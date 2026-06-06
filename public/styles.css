@@ -98,3 +98,20 @@ body {
   padding: 40px 0;
   font-size: 14px;
 }
+
+.controls { display: flex; align-items: center; gap: 8px; padding: 8px 16px; }
+.controls .spacer { flex: 1; }
+.seg {
+  font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #ccc;
+  background: #fff; border-radius: 6px; cursor: pointer; color: #333;
+}
+.seg.active { background: #06c; color: #fff; border-color: #06c; }
+.seg[hidden] { display: none; }
+.actions { display: flex; gap: 8px; margin-top: 8px; }
+.act {
+  font: inherit; font-size: 12px; padding: 3px 8px; border: 1px solid #ddd;
+  background: #fafafa; border-radius: 6px; cursor: pointer; color: #444;
+}
+.act:hover { background: #f0f0f0; }
+.act:disabled { opacity: 0.6; cursor: default; }
+.idle-age { font-size: 12px; color: #999; margin-top: 4px; }
