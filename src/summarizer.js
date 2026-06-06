@@ -157,5 +157,15 @@ export function createSummarizer({
     return runSummary(window);
   }
 
-  return { enabled, getTitle, schedule, getUsage };
+  /**
+   * Manual on-demand summary: bypasses enabled / running / turn-gating / backoff.
+   * Still dedupes via inflight. The click itself is the user's consent, so this
+   * runs even when auto-summary (enabled) is off.
+   */
+  async function summarizeNow(window) {
+    if (inflight.has(window.id)) return getTitle(window);
+    return runSummary(window);
+  }
+
+  return { enabled, getTitle, schedule, summarizeNow, getUsage };
 }

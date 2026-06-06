@@ -153,3 +153,15 @@ test('summarizer accumulates usage across calls', async () => {
   assert.equal(u.outputTokens, 10);
   assert.ok(Math.abs(u.costUsd - 0.02) < 1e-9);
 });
+
+// Task 3: summarizeNow
+
+test('summarizeNow ignores enabled + running gating', async () => {
+  let calls = 0;
+  const stdout = JSON.stringify({ result: '手动标题', usage: { input_tokens: 1, output_tokens: 1 } });
+  const s = createSummarizer({ enabled: false, exec: async () => { calls += 1; return stdout; } });
+  const t = await s.summarizeNow({ id: 'x', status: 'running', lastActivityAt: 1, title: 't' });
+  assert.equal(t, '手动标题');
+  assert.equal(calls, 1);
+  assert.equal(s.getUsage().calls, 1);
+});
