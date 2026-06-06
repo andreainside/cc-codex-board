@@ -10,6 +10,7 @@ import { buildBoard } from './collector.js';
 import { createRunners } from './runner.js';
 import { createSummarizer } from './summarizer.js';
 import { memoizeAsync } from './cache.js';
+import { chooseHeadline } from './headline.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PUBLIC = path.join(__dirname, '..', 'public');
@@ -29,10 +30,26 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
+function readJsonBody(req, limit = 64 * 1024) {
+  return new Promise((resolve) => {
+    let data = '';
+    let tooBig = false;
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > limit) { tooBig = true; req.destroy(); }
+    });
+    req.on('end', () => {
+      if (tooBig) return resolve(null);
+      try { resolve(JSON.parse(data || '{}')); } catch { resolve(null); }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
 /**
- * @param {{getBoard:()=>Promise<object>, publicDir?:string}} deps
+ * @param {{getBoard:()=>Promise<object>, summarizeWindow?:Function|null, restoreWindow?:Function|null, publicDir?:string}} deps
  */
-export function createRequestHandler({ getBoard, publicDir = DEFAULT_PUBLIC }) {
+export function createRequestHandler({ getBoard, summarizeWindow = null, restoreWindow = null, publicDir = DEFAULT_PUBLIC }) {
   const root = path.resolve(publicDir);
   return async function handle(req, res) {
     let pathname = '/';
@@ -46,6 +63,22 @@ export function createRequestHandler({ getBoard, publicDir = DEFAULT_PUBLIC }) {
       try {
         const board = await getBoard();
         sendJson(res, 200, board);
+      } catch (err) {
+        sendJson(res, 500, { error: String((err && err.message) || err) });
+      }
+      return;
+    }
+
+    if (pathname === '/api/summarize' || pathname === '/api/restore') {
+      if (req.method !== 'POST') { res.writeHead(405); res.end('Method Not Allowed'); return; }
+      const body = await readJsonBody(req);
+      const id = body && typeof body.id === 'string' ? body.id : null;
+      if (!id) { sendJson(res, 400, { error: 'missing id' }); return; }
+      const fn = pathname === '/api/summarize' ? summarizeWindow : restoreWindow;
+      try {
+        const result = fn ? await fn(id) : null;
+        if (!result) { sendJson(res, 404, { error: 'unknown window' }); return; }
+        sendJson(res, 200, result);
       } catch (err) {
         sendJson(res, 500, { error: String((err && err.message) || err) });
       }
@@ -98,6 +131,8 @@ export function createBoardProvider(config) {
   // Persistent across builds so its cache + idle-transition tracking survive.
   const summarizer = createSummarizer({ enabled: !!config.summary, model: config.summaryModel });
 
+  const restoredAt = new Map(); // id -> ms; manual restore resets the idle clock
+
   const build = () =>
     buildBoard({
       claudeRoot: config.claudeRoot,
@@ -113,12 +148,37 @@ export function createBoardProvider(config) {
       codexActiveWindowMs: config.codexActiveWindowMs,
       titleMax: config.titleMax,
       labels: config.labels,
+      idleArchiveMs: config.idleArchiveMs,
+      idleDropMs: config.idleDropMs,
+      getRestoredAt: (id) => restoredAt.get(id) || 0,
     });
 
   // Cache the whole board briefly so rapid browser polling is cheap; git/gh
   // calls inside have their own longer TTL.
   const getBoard = memoizeAsync(build, { ttlMs: config.localTtlMs, keyFn: () => 'board' });
-  return { getBoard };
+
+  async function summarizeWindow(id) {
+    const board = await getBoard();
+    const all = [...(board.windows || []), ...((board.archive && board.archive.windows) || [])];
+    const w = all.find((x) => x.id === id);
+    if (!w) return null;
+    const title = await summarizer.summarizeNow(w);
+    if (!title) return { id, title: null, headline: w.headline };
+    return { id, title, headline: chooseHeadline({ ...w, summaryTitle: title }) };
+  }
+
+  async function restoreWindow(id) {
+    const board = await getBoard();
+    const all = [...(board.windows || []), ...((board.archive && board.archive.windows) || [])];
+    if (!all.some((x) => x.id === id)) return null;
+    restoredAt.set(id, Date.now());
+    // prune stale restore markers
+    const cutoff = Date.now() - (config.idleDropMs || 30 * 3600_000);
+    for (const [k, v] of restoredAt) if (v < cutoff) restoredAt.delete(k);
+    return { id, ok: true };
+  }
+
+  return { getBoard, summarizeWindow, restoreWindow };
 }
 
 /**
@@ -126,7 +186,7 @@ export function createBoardProvider(config) {
  * @param {object} config
  */
 export function createServer(config) {
-  const { getBoard } = createBoardProvider(config);
-  const handler = createRequestHandler({ getBoard });
+  const { getBoard, summarizeWindow, restoreWindow } = createBoardProvider(config);
+  const handler = createRequestHandler({ getBoard, summarizeWindow, restoreWindow });
   return http.createServer(handler);
 }

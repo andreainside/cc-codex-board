@@ -93,3 +93,51 @@ test('a symlink inside public/ pointing outside is not served', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+async function post(port, path, body) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.text() };
+}
+
+test('POST /api/summarize returns headline', async () => {
+  const handler = createRequestHandler({
+    getBoard: async () => ({ windows: [{ id: 'cc:1' }], archive: { windows: [] } }),
+    summarizeWindow: async (id) => ({ id, title: 'hi', headline: { text: 'hi', source: 'summary' } }),
+  });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await post(port, '/api/summarize', { id: 'cc:1' });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).headline.text, 'hi');
+  } finally { server.close(); }
+});
+
+test('POST /api/summarize unknown id → 404', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), summarizeWindow: async () => null });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await post(port, '/api/summarize', { id: 'nope' });
+    assert.equal(r.status, 404);
+  } finally { server.close(); }
+});
+
+test('GET /api/summarize → 405', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), summarizeWindow: async () => null });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await get(port, '/api/summarize');
+    assert.equal(r.status, 405);
+  } finally { server.close(); }
+});
+
+test('POST /api/restore → ok', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), restoreWindow: async (id) => ({ id, ok: true }) });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await post(port, '/api/restore', { id: 'cc:1' });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, true);
+  } finally { server.close(); }
+});
