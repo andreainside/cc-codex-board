@@ -114,3 +114,66 @@ test('renderBoard escapes window titles', () => {
   assert.match(html, /&lt;b&gt;build&lt;\/b&gt; login/);
   assert.ok(!html.includes('<b>build</b> login'));
 });
+
+import { formatTokens, usageHint } from '../public/render.js';
+
+test('formatTokens: K/M compaction', () => {
+  assert.equal(formatTokens(0), '0');
+  assert.equal(formatTokens(950), '950');
+  assert.equal(formatTokens(34_500), '34.5K');
+  assert.equal(formatTokens(1_200_000), '1.2M');
+});
+
+test('usageHint: zero calls → honest 0', () => {
+  assert.equal(usageHint({ summaryEnabled: false, llmUsage: { calls: 0 } }), '本地只读 · 0 次 LLM 调用');
+});
+
+test('usageHint: nonzero → calls + tokens + cost', () => {
+  const h = usageHint({ llmUsage: { calls: 12, inputTokens: 30_000, outputTokens: 4_500, costUsd: 0.02 } });
+  assert.match(h, /12 次调用/);
+  assert.match(h, /34\.5K tok/);
+  assert.match(h, /\$0\.02/);
+});
+
+test('renderBoard grouping=status puts needs-you section first with counts', () => {
+  const board = {
+    summary: { total: 2, counts: {} },
+    windows: [
+      { id: 'a', tool: 'CC', status: 'idle', title: 'x' },
+      { id: 'b', tool: 'CC', status: 'needs-you', title: 'y' },
+    ],
+    groups: [], archive: { windows: [] },
+  };
+  const html = renderBoard(board, Date.now(), { grouping: 'status' });
+  const needsIdx = html.indexOf('等你');
+  const idleIdx = html.indexOf('空闲');
+  assert.ok(needsIdx >= 0 && idleIdx >= 0 && needsIdx < idleIdx, 'needs-you before idle');
+});
+
+test('renderBoard view=archive renders idle-age + restore button', () => {
+  const board = { archive: { windows: [{ id: 'c', tool: 'CC', status: 'idle', title: 'z', lastActivityAt: Date.now() - 5 * 3600_000 }] } };
+  const html = renderBoard(board, Date.now(), { view: 'archive' });
+  assert.match(html, /已空闲/);
+  assert.match(html, /data-action="restore"/);
+});
+
+test('cards carry a summarize button', () => {
+  const board = { summary: { total: 1, counts: {} }, groups: [{ repo: 'r', windows: [{ id: 'a', tool: 'CC', status: 'idle', title: 'x' }] }], windows: [], archive: { windows: [] } };
+  assert.match(renderBoard(board, Date.now()), /data-action="summarize"/);
+});
+
+test('renderBoard focus shows only needs-you + running (repo & status)', () => {
+  const ws = [
+    { id: 'a', tool: 'CC', status: 'needs-you', title: 'A' },
+    { id: 'b', tool: 'CC', status: 'idle', title: 'B' },
+    { id: 'c', tool: 'CC', status: 'waiting-ci-review', title: 'C' },
+    { id: 'd', tool: 'CC', status: 'running', title: 'D' },
+  ];
+  const board = { summary: { total: 4, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const repo = renderBoard(board, Date.now(), { focus: true });
+  assert.ok(repo.includes('data-id="a"') && repo.includes('data-id="d"'), 'keeps needs-you + running');
+  assert.ok(!repo.includes('data-id="b"') && !repo.includes('data-id="c"'), 'hides idle + waiting');
+  const status = renderBoard(board, Date.now(), { grouping: 'status', focus: true });
+  assert.ok(status.includes('data-id="a"') && status.includes('data-id="d"'));
+  assert.ok(!status.includes('data-id="b"') && !status.includes('data-id="c"'));
+});

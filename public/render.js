@@ -43,6 +43,27 @@ export function statusMeta(status) {
   return STATUS_META[status] || { label: status || '?', color: '#999' };
 }
 
+/** Compact token count: "950", "34.5K", "1.2M". */
+export function formatTokens(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+}
+
+/** Top-bar mode/usage hint from board.meta. Honest "0 次" until a call happens. */
+export function usageHint(meta) {
+  const u = (meta && meta.llmUsage) || { calls: 0 };
+  if (!u.calls) {
+    return meta && meta.summaryEnabled
+      ? '本地只读 · AI 标题:Haiku(走订阅)· 0 次调用'
+      : '本地只读 · 0 次 LLM 调用';
+  }
+  const tok = formatTokens((u.inputTokens || 0) + (u.outputTokens || 0));
+  const cost = u.costUsd ? ` · $${u.costUsd < 0.01 ? u.costUsd.toFixed(4) : u.costUsd.toFixed(2)}` : '';
+  return `本地只读 · ${u.calls} 次调用 · ${tok} tok${cost}`;
+}
+
 function toolBadge(tool, label, entrypoint) {
   let text = tool;
   if (tool === 'CC') {
@@ -94,11 +115,19 @@ function locationLine(w) {
   return bits.join(' · ');
 }
 
-function renderCard(w, now) {
+function renderCard(w, now, opts = {}) {
   const meta = statusMeta(w.status);
   const dur = formatDuration((now ?? Date.now()) - (w.startedAt ?? now));
   const last = w.lastActivityAt ? relativeTime((now ?? Date.now()) - w.lastActivityAt) : '';
   const timeline = `🕐 开始 ${clock(w.startedAt)} · 运行 ${dur}${last ? ` · 活动 ${last}` : ''}`;
+
+  const idleLine = opts.archive && w.lastActivityAt
+    ? `<div class="idle-age">已空闲 ${formatDuration((now ?? Date.now()) - w.lastActivityAt)}</div>`
+    : '';
+  const sumBtn = `<button class="act" data-id="${escapeHtml(w.id)}" data-action="summarize">✨ 总结</button>`;
+  const restoreBtn = opts.archive
+    ? `<button class="act" data-id="${escapeHtml(w.id)}" data-action="restore">↩ 恢复</button>`
+    : '';
 
   // 1) headline — "what it's doing" (AI summary / PR title / branch / window title / opening prompt)
   const headline = (w.headline && w.headline.text) || w.title || '(尚无提问)';
@@ -127,6 +156,8 @@ function renderCard(w, now) {
       ${lastMsg}
       ${prRow(w.pr)}
       <div class="timeline">${escapeHtml(timeline)}</div>
+      ${idleLine}
+      <div class="actions">${sumBtn}${restoreBtn}</div>
     </div>`;
 }
 
@@ -140,23 +171,59 @@ function summaryBar(summary) {
     </div>`;
 }
 
+function groupByStatus(windows, now) {
+  const order = ['needs-you', 'running', 'waiting-ci-review', 'idle'];
+  return order
+    .map((status) => {
+      const ws = (windows || []).filter((w) => w.status === status);
+      const m = statusMeta(status);
+      const head = `<h2 class="repo" style="color:${m.color}">● ${escapeHtml(m.label)} (${ws.length})</h2>`;
+      const grid = ws.length ? `<div class="grid">${ws.map((w) => renderCard(w, now)).join('')}</div>` : '';
+      return `<section class="group">${head}${grid}</section>`;
+    })
+    .join('');
+}
+
 /**
  * Render the whole board to an HTML string.
  * @param {object} board the /api/windows payload
  * @param {number} [now]
+ * @param {{view?:string, grouping?:string, focus?:boolean}} [opts]
  */
-export function renderBoard(board, now) {
-  if (!board || !board.summary) return '<div class="empty">没有数据</div>';
+export function renderBoard(board, now, opts = {}) {
+  if (!board || (!board.summary && !board.archive)) return '<div class="empty">没有数据</div>';
   const t = now ?? board.generatedAt ?? Date.now();
-  const groups = (board.groups || [])
-    .map(
-      (g) => `
+  const view = opts.view || 'main';
+  const grouping = opts.grouping || 'repo';
+  const focus = !!opts.focus; // when on: only needs-you + running
+
+  if (view === 'archive') {
+    const ws = (board.archive && board.archive.windows) || [];
+    if (!ws.length) return '<div class="empty">存档为空</div>';
+    return `<section class="group"><div class="grid">${ws.map((w) => renderCard(w, t, { archive: true })).join('')}</div></section>`;
+  }
+
+  const keep = (w) => !focus || w.status === 'needs-you' || w.status === 'running';
+  const bar = board.summary ? summaryBar(board.summary) : '';
+  let body;
+  if (grouping === 'status') {
+    body = groupByStatus((board.windows || []).filter(keep), t);
+  } else {
+    body = (board.groups || [])
+      .map((g) => ({ repo: g.repo, windows: (g.windows || []).filter(keep) }))
+      .filter((g) => g.windows.length)
+      .map(
+        (g) => `
       <section class="group">
         <h2 class="repo">${escapeHtml(g.repo)}</h2>
         <div class="grid">${g.windows.map((w) => renderCard(w, t)).join('')}</div>
       </section>`,
-    )
-    .join('');
-  const empty = (board.summary.total || 0) === 0 ? '<div class="empty">没有检测到活跃的 CC / Codex 窗口</div>' : '';
-  return summaryBar(board.summary) + groups + empty;
+      )
+      .join('');
+  }
+  const visible = (board.windows || []).filter(keep).length;
+  let empty = '';
+  if (board.summary && (board.summary.total || 0) === 0) empty = '<div class="empty">没有检测到活跃的 CC / Codex 窗口</div>';
+  else if (focus && visible === 0) empty = '<div class="empty">专注模式:当前没有「等你 / 跑着」的窗口</div>';
+  return bar + body + empty;
 }
