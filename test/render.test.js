@@ -178,6 +178,27 @@ test('renderBoard focus shows only needs-you + running (repo & status)', () => {
   assert.ok(!status.includes('data-id="b"') && !status.includes('data-id="c"'));
 });
 
+test('renderBoard focus keeps real status counts, only collapses the cards', () => {
+  const ws = [
+    { id: 'a', tool: 'CC', status: 'needs-you', title: 'A' },
+    { id: 'b', tool: 'CC', status: 'idle', title: 'B' },
+    { id: 'b2', tool: 'CC', status: 'idle', title: 'B2' },
+    { id: 'c', tool: 'CC', status: 'waiting-ci-review', title: 'C' },
+    { id: 'd', tool: 'CC', status: 'running', title: 'D' },
+  ];
+  const board = { summary: { total: 5, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const status = renderBoard(board, Date.now(), { grouping: 'status', focus: true });
+  // real counts preserved in the section headers (not zeroed)
+  assert.match(status, /空闲 \(2\)/);
+  assert.match(status, /等CI\/复评 \(1\)/);
+  assert.ok(!status.includes('空闲 (0)'), 'idle count must show the real number, not 0');
+  // cards for hidden statuses are collapsed, with a hint
+  assert.ok(!status.includes('data-id="b"') && !status.includes('data-id="b2"') && !status.includes('data-id="c"'));
+  assert.match(status, /已收起/);
+  // needs-you + running cards still shown
+  assert.ok(status.includes('data-id="a"') && status.includes('data-id="d"'));
+});
+
 test('renderBoard threads notes; card shows note + data-session', () => {
   const board = { summary: { total: 1, counts: {} }, windows: [], groups: [{ repo: 'r', windows: [{ id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'x' }] }], archive: { windows: [] } };
   const html = renderBoard(board, Date.now(), { notes: { s1: '等 Bob review' } });

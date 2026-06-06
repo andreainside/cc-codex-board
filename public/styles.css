@@ -123,3 +123,4 @@ body {
 .note-input { font: inherit; font-size: 12px; width: 100%; padding: 2px 6px; border: 1px solid #06c; border-radius: 5px; }
 .subgroup { margin: 6px 0 10px; }
 .folder { font-size: 12px; font-weight: 600; color: #777; margin: 6px 0 4px; padding-left: 2px; }
+.repo.collapsed { opacity: 0.5; font-weight: normal; }

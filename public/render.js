@@ -209,14 +209,17 @@ function groupByFolder(windows, now, cardOpts) {
     .join('');
 }
 
-function groupByStatus(windows, now, cardOpts = {}) {
+function groupByStatus(windows, now, cardOpts = {}, focus = false) {
   const order = ['needs-you', 'running', 'waiting-ci-review', 'idle'];
+  const shown = (status) => !focus || status === 'needs-you' || status === 'running';
   return order
     .map((status) => {
       const ws = (windows || []).filter((w) => w.status === status);
       const m = statusMeta(status);
-      const head = `<h2 class="repo" style="color:${m.color}">● ${escapeHtml(m.label)} (${ws.length})</h2>`;
-      const grid = ws.length ? `<div class="grid">${ws.map((w) => renderCard(w, now, cardOpts)).join('')}</div>` : '';
+      // Focus mode keeps the real count but collapses the cards of hidden statuses.
+      const collapsed = focus && !shown(status) && ws.length > 0;
+      const head = `<h2 class="repo${collapsed ? ' collapsed' : ''}" style="color:${m.color}">● ${escapeHtml(m.label)} (${ws.length})${collapsed ? ' · 已收起' : ''}</h2>`;
+      const grid = ws.length && shown(status) ? `<div class="grid">${ws.map((w) => renderCard(w, now, cardOpts)).join('')}</div>` : '';
       return `<section class="group">${head}${grid}</section>`;
     })
     .join('');
@@ -247,7 +250,7 @@ export function renderBoard(board, now, opts = {}) {
   const bar = board.summary ? summaryBar(board.summary) : '';
   let body;
   if (grouping === 'status') {
-    body = groupByStatus((board.windows || []).filter(keep), t, cardOpts);
+    body = groupByStatus(board.windows || [], t, cardOpts, focus);
   } else {
     body = (board.groups || [])
       .map((g) => ({ repo: g.repo, windows: (g.windows || []).filter(keep) }))
