@@ -141,3 +141,15 @@ test('POST /api/restore → ok', async () => {
     assert.equal(JSON.parse(r.body).ok, true);
   } finally { server.close(); }
 });
+
+test('POST /api/summarize with oversized body returns 400 (no hang)', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), summarizeWindow: async () => null });
+  const { server, port } = await startServer(handler);
+  try {
+    const big = 'x'.repeat(100 * 1024); // > 64KB
+    const res = await fetch(`http://127.0.0.1:${port}/api/summarize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: big }),
+    });
+    assert.equal(res.status, 400);
+  } finally { server.close(); }
+});

@@ -33,16 +33,24 @@ function sendJson(res, status, obj) {
 function readJsonBody(req, limit = 64 * 1024) {
   return new Promise((resolve) => {
     let data = '';
+    let done = false;
     let tooBig = false;
+    const finish = (val) => { if (!done) { done = true; resolve(val); } };
     req.on('data', (chunk) => {
+      if (tooBig) return; // already draining; discard
       data += chunk;
-      if (data.length > limit) { tooBig = true; req.destroy(); }
+      if (data.length > limit) {
+        tooBig = true;
+        data = ''; // free memory; keep draining so the socket stays open for the response
+        req.resume();
+      }
     });
     req.on('end', () => {
-      if (tooBig) return resolve(null);
-      try { resolve(JSON.parse(data || '{}')); } catch { resolve(null); }
+      if (tooBig) return finish(null);
+      try { finish(JSON.parse(data || '{}')); } catch { finish(null); }
     });
-    req.on('error', () => resolve(null));
+    req.on('close', () => finish(null)); // destroyed (oversized) or client aborted
+    req.on('error', () => finish(null));
   });
 }
 
@@ -70,7 +78,7 @@ export function createRequestHandler({ getBoard, summarizeWindow = null, restore
     }
 
     if (pathname === '/api/summarize' || pathname === '/api/restore') {
-      if (req.method !== 'POST') { res.writeHead(405); res.end('Method Not Allowed'); return; }
+      if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method Not Allowed' }); return; }
       const body = await readJsonBody(req);
       const id = body && typeof body.id === 'string' ? body.id : null;
       if (!id) { sendJson(res, 400, { error: 'missing id' }); return; }
