@@ -53,3 +53,21 @@ test('parseFlags parses --key value, --flag, and --key=value', () => {
   assert.equal(f['claude-root'], '/x/.claude');
   assert.equal(f.open, true);
 });
+
+test('idle thresholds: defaults are 4h / 30h', () => {
+  const c = resolveConfig({ home: '/h' });
+  assert.equal(c.idleArchiveMs, 4 * 3600_000);
+  assert.equal(c.idleDropMs, 30 * 3600_000);
+});
+
+test('idle thresholds: flags in hours; 0 disables', () => {
+  const c = resolveConfig({ home: '/h', flags: { 'idle-archive': 2, 'idle-drop': 0 } });
+  assert.equal(c.idleArchiveMs, 2 * 3600_000);
+  assert.equal(c.idleDropMs, 0);
+});
+
+test('idle thresholds: config file uses hours', () => {
+  const c = resolveConfig({ home: '/h', fileConfig: { idleArchiveHours: 6, idleDropHours: 48 } });
+  assert.equal(c.idleArchiveMs, 6 * 3600_000);
+  assert.equal(c.idleDropMs, 48 * 3600_000);
+});

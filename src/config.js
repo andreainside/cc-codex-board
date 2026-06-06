@@ -10,6 +10,8 @@ export const DEFAULTS = {
   runningRecencyMs: 90_000, // activity newer than this ⇒ "running" when no raw status
   codexActiveWindowMs: 2 * 60 * 60_000, // a Codex rollout counts as a live window if active within this
   titleMax: 90,
+  idleArchiveMs: 4 * 3600_000, // idle ≥ this ⇒ move to archive view
+  idleDropMs: 30 * 3600_000, // idle ≥ this ⇒ dropped entirely (0 = never)
   git: true,
   gh: true,
   open: false,
@@ -40,6 +42,9 @@ function expandHome(p, home) {
 export function resolveConfig({ home, platform = process.platform, fileConfig = {}, flags = {} }) {
   const c = { ...DEFAULTS, ...fileConfig };
 
+  if (fileConfig.idleArchiveHours != null) c.idleArchiveMs = Number(fileConfig.idleArchiveHours) * 3600_000;
+  if (fileConfig.idleDropHours != null) c.idleDropMs = Number(fileConfig.idleDropHours) * 3600_000;
+
   // Flag overrides (only when present)
   if (flags.port != null) c.port = Number(flags.port);
   if (flags['claude-root']) c.claudeRoot = flags['claude-root'];
@@ -52,6 +57,8 @@ export function resolveConfig({ home, platform = process.platform, fileConfig = 
   if (flags.summary) c.summary = true;
   if (flags['no-summary']) c.summary = false;
   if (flags['summary-model']) c.summaryModel = flags['summary-model'];
+  if (flags['idle-archive'] != null) c.idleArchiveMs = Number(flags['idle-archive']) * 3600_000;
+  if (flags['idle-drop'] != null) c.idleDropMs = Number(flags['idle-drop']) * 3600_000;
 
   c.claudeRoot = expandHome(c.claudeRoot || path.join(home, '.claude'), home);
   c.codexRoot = expandHome(c.codexRoot || path.join(home, '.codex'), home);
