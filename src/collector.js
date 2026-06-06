@@ -11,7 +11,13 @@ import { parseDesktopSession } from './cc-desktop.js';
 import { deriveStatus, compareWindows, summarize, STATUS_PRIORITY } from './status.js';
 import { chooseHeadline } from './headline.js';
 
-const NOOP_SUMMARIZER = { enabled: false, getTitle: () => null, schedule: () => null };
+const NOOP_SUMMARIZER = {
+  enabled: false,
+  getTitle: () => null,
+  schedule: () => null,
+  summarizeNow: async () => null,
+  getUsage: () => ({ calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 }),
+};
 
 // Entrypoints that are NOT user-facing windows: `claude -p` / SDK / headless
 // runs (including this board's own summary calls). Real windows are 'cli'
@@ -294,12 +300,16 @@ export async function buildBoard(deps) {
     codexActiveWindowMs = 2 * 60 * 60_000,
     titleMax = 90,
     labels = {},
+    idleArchiveMs = 4 * 3600_000,
+    idleDropMs = 30 * 3600_000,
+    getRestoredAt = () => 0,
   } = deps;
 
   const desktopTitles = loadDesktopTitles(desktopRoot);
   const cc = claudeRoot ? collectCcWindows({ claudeRoot, now, isPidAlive, titleMax, desktopTitles }) : [];
+  const codexCollectMs = idleDropMs > 0 ? Math.max(codexActiveWindowMs, idleDropMs) : 7 * 24 * 3600_000;
   const codex = codexRoot
-    ? collectCodexWindows({ codexRoot, now, activeWindowMs: codexActiveWindowMs, titleMax })
+    ? collectCodexWindows({ codexRoot, now, activeWindowMs: codexCollectMs, titleMax })
     : [];
   const windows = [...cc, ...codex];
 
@@ -332,18 +342,37 @@ export async function buildBoard(deps) {
     w.subtitle = w.headline.source !== 'prompt' ? w.title || '' : '';
   }
 
-  // Kick off summaries for windows that just finished a turn (fire-and-forget;
-  // results land in the next refresh). No-op unless the summarizer is enabled.
+  // Idle lifecycle: bucket idle windows by effective idle age.
+  // effectiveActivity = max(real activity, manual restore time).
+  const effectiveActivity = (w) => Math.max(w.lastActivityAt || 0, w.startedAt || 0, getRestoredAt(w.id) || 0);
+  const zoneFor = (w) => {
+    if (w.status !== 'idle') return 'main';
+    if (!idleArchiveMs) return 'main';
+    const age = now - effectiveActivity(w);
+    if (age < idleArchiveMs) return 'main';
+    if (idleDropMs && age > idleDropMs) return 'dropped';
+    return 'archive';
+  };
+  const mainWindows = [];
+  const archiveWindows = [];
   for (const w of windows) {
+    const z = zoneFor(w);
+    if (z === 'main') mainWindows.push(w);
+    else if (z === 'archive') archiveWindows.push(w);
+    // 'dropped' → omitted from the payload entirely
+  }
+
+  // Auto-summaries only for main windows (don't spend calls on stale/archived).
+  for (const w of mainWindows) {
     const p = summarizer.schedule(w);
     if (p && typeof p.catch === 'function') p.catch(() => {});
   }
 
-  windows.sort(compareWindows);
+  mainWindows.sort(compareWindows);
 
-  // Group by repo; group order = best (lowest) status priority within it, then name.
+  // Group main by repo; group order = best status priority within it, then name.
   const groupMap = new Map();
-  for (const w of windows) {
+  for (const w of mainWindows) {
     const key = w.repo || w.cwd || '(unknown)';
     if (!groupMap.has(key)) groupMap.set(key, []);
     groupMap.get(key).push(w);
@@ -356,11 +385,15 @@ export async function buildBoard(deps) {
     }))
     .sort((a, b) => a.topPriority - b.topPriority || a.repo.localeCompare(b.repo));
 
+  // Archive: most-recent activity first (review timeline).
+  archiveWindows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+
   return {
     generatedAt: now,
-    meta: { summaryEnabled: !!summarizer.enabled },
-    summary: summarize(windows),
-    windows,
+    meta: { summaryEnabled: !!summarizer.enabled, llmUsage: summarizer.getUsage() },
+    summary: summarize(mainWindows),
+    windows: mainWindows,
     groups,
+    archive: { count: archiveWindows.length, windows: archiveWindows },
   };
 }
