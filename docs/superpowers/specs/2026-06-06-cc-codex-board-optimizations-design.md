@@ -2,7 +2,7 @@
 
 - 日期:2026-06-06
 - 状态:待 review(实现前)
-- 范围:对已发布的 cc-codex-board 做 5 项优化(含 1 个 bug 修复)+ 一次发布(0.2.0)
+- 范围:对已发布的 cc-codex-board 做 6 项优化(含 1 个 bug 修复)+ 一次发布(0.2.0)
 
 ## 背景 / 问题
 
@@ -26,6 +26,7 @@ cc-codex-board 是一个本地只读看板,展示所有在跑的 Claude Code / C
 - 每张卡片一个手动"✨ 总结"按钮(含正在跑的窗口)。
 - 空闲窗口三段生命周期:主视图 → 存档/复盘视图 → 丢弃;存档可**手动恢复**进主视图。
 - 主视图支持"按仓库 / 按状态"切换。
+- 主视图「专注」过滤:一键只看「等你 + 跑着」(隐藏空闲与等CI/复评)。
 - 顶栏显示看板自启动以来的真实 LLM 用量(调用次数 · token · 估算花费)。
 - 修复「等你」(needs-you) 漏报:CC 卡在权限/确认提示时正确显示「等你」而非把「跑着」-1。
 
@@ -184,6 +185,20 @@ else                               zone = 'archive'
 
 ### 测试
 - `render` 单测:`grouping==='status'`(needs-you 段在前、各段计数正确);`view==='archive'`(列表 + 「已空闲」标签);卡片含 `[✨ 总结]` 按钮。
+
+---
+
+## 特性 ⑥ 主视图「专注」过滤(只看 等你 + 跑着)
+
+### 行为
+顶栏「专注」开关(与「按仓库/按状态」「🗄 存档」并排)。开启后主视图只显示 `needs-you` 和 `running` 的窗口,隐藏 `idle` 与 `waiting-ci-review`。与分组方式**正交**(repo / status 下都生效)。汇总条仍显示完整计数(总览不变)。状态存 `localStorage`(键 `ccb-focus`)。存档视图不受影响。
+
+### 前端
+- `render.js`:`renderBoard(board, now, { ..., focus })`;`focus` 时把 `board.windows` / 各 group 的 windows 过滤到 `status ∈ {needs-you, running}`,repo 分组下丢空组;全被过滤时显示"专注模式:当前没有「等你/跑着」"。
+- `app.js` + `index.html`:加「专注」按钮 + `ccb-focus` 持久化。
+
+### 测试
+- `render` 单测:focus 下 repo 与 status 分组都只剩 needs-you/running 的卡片(idle、waiting-ci-review 的 `data-id` 不出现)。
 
 ---
 
