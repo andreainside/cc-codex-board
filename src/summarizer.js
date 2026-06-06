@@ -6,15 +6,18 @@
 // caches per turn, and falls back silently to the non-LLM headline on any error.
 
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 
 const DEFAULT_MODEL = 'claude-haiku-4-5';
 const DEFAULT_MAX_LEN = 24;
-const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_CONCURRENCY = 3;
 
 function defaultExec(file, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+    // Run from a neutral cwd so `claude -p` doesn't load the window's project
+    // CLAUDE.md / .mcp.json — the titling task needs none of it.
+    execFile(file, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024, cwd: os.tmpdir() }, (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout);
     });
@@ -117,7 +120,11 @@ export function createSummarizer({
     inflight.add(window.id);
     active += 1;
     try {
-      const args = ['-p', '--output-format', 'json', '--model', model, buildSummaryPrompt(window)];
+      // Titling needs no tools or project context. --strict-mcp-config skips
+      // loading the user's MCP servers (initializing ~20 of them on a busy
+      // machine is the dominant startup cost); defaultExec also runs it from a
+      // neutral cwd so no per-project CLAUDE.md/.mcp.json is loaded.
+      const args = ['-p', '--output-format', 'json', '--strict-mcp-config', '--model', model, buildSummaryPrompt(window)];
       const stdout = await exec('claude', args, timeoutMs);
       const { title, usage } = parseClaudeResult(stdout, { maxLen });
       recordUsage(usage);

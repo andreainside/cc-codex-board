@@ -27,6 +27,7 @@ Options:
   --summary             Opt-in AI headline via local 'claude -p' (uses your CC
                         subscription, not the API). Off by default.
   --summary-model <m>   Model for --summary (default claude-haiku-4-5)
+  --summary-timeout <s> Seconds to wait for each claude -p call (default 90)
   --idle-archive <h>    Idle windows older than h hours move to the archive view
                         (default 4; 0 disables the archive)
   --idle-drop <h>       Idle windows older than h hours are dropped entirely

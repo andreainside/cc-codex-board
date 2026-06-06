@@ -18,6 +18,7 @@ export const DEFAULTS = {
   terminalTitles: true, // resolve CLI terminal tab titles (macOS, read-only AppleScript)
   summary: false, // OPT-IN: AI headline via `claude -p` (CC subscription). Off ⇒ zero LLM calls.
   summaryModel: 'claude-haiku-4-5',
+  summaryTimeoutMs: 90_000, // a cold `claude -p` on a busy machine can take >20s; be generous
   labels: {}, // pid or cwd -> friendly label
 };
 
@@ -57,6 +58,7 @@ export function resolveConfig({ home, platform = process.platform, fileConfig = 
   if (flags.summary) c.summary = true;
   if (flags['no-summary']) c.summary = false;
   if (flags['summary-model']) c.summaryModel = flags['summary-model'];
+  if (flags['summary-timeout'] != null) c.summaryTimeoutMs = Number(flags['summary-timeout']) * 1000;
   if (flags['idle-archive'] != null) c.idleArchiveMs = Number(flags['idle-archive']) * 3600_000;
   if (flags['idle-drop'] != null) c.idleDropMs = Number(flags['idle-drop']) * 3600_000;
 

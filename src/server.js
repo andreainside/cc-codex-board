@@ -137,7 +137,7 @@ export function createBoardProvider(config) {
     : null;
 
   // Persistent across builds so its cache + idle-transition tracking survive.
-  const summarizer = createSummarizer({ enabled: !!config.summary, model: config.summaryModel });
+  const summarizer = createSummarizer({ enabled: !!config.summary, model: config.summaryModel, timeoutMs: config.summaryTimeoutMs });
 
   const restoredAt = new Map(); // id -> ms; manual restore resets the idle clock
 

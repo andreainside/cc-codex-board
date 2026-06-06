@@ -18,6 +18,7 @@ let view = 'main';
 let grouping = localStorage.getItem('ccb-grouping') === 'status' ? 'status' : 'repo';
 let focus = localStorage.getItem('ccb-focus') === '1';
 let editing = false;
+let busy = false; // a (slow) summarize call is in flight — keep its spinner, pause poll re-render
 
 function loadNotes() {
   const m = {};
@@ -40,7 +41,7 @@ function syncControls() {
 }
 
 function render() {
-  if (!lastBoard || editing) return;
+  if (!lastBoard || editing || busy) return;
   boardEl.innerHTML = renderBoard(lastBoard, Date.now(), { view, grouping, focus, notes: loadNotes() });
   if (modeHintEl) modeHintEl.textContent = usageHint(lastBoard.meta);
   syncControls();
@@ -123,34 +124,54 @@ boardEl.addEventListener('click', async (e) => {
   }
 
   const orig = btn.textContent;
+
+  if (action === 'summarize') {
+    btn.disabled = true;
+    btn.textContent = '总结中…';
+    busy = true; // keep this spinner; pause poll re-render while the (slow) call runs
+    try {
+      const r = await postAction('/api/summarize', id);
+      if (r && r.title) {
+        const w = findWindow(id);
+        if (w) { w.headline = r.headline; w.summaryTitle = r.title; }
+        busy = false;
+        render();
+      } else {
+        // HTTP 200 but no title ⇒ claude -p timed out / failed (usually a busy machine)
+        btn.textContent = '超时·重试';
+        btn.disabled = false;
+        setTimeout(() => { busy = false; render(); }, 3000);
+      }
+    } catch {
+      btn.textContent = '失败';
+      btn.disabled = false;
+      setTimeout(() => { busy = false; render(); }, 3000);
+    }
+    return;
+  }
+
+  // restore
   btn.disabled = true;
   btn.textContent = '…';
   try {
-    if (action === 'summarize') {
-      const r = await postAction('/api/summarize', id);
-      const w = findWindow(id);
-      if (w && r.headline) { w.headline = r.headline; w.summaryTitle = r.title; }
-      render();
-    } else if (action === 'restore') {
-      await postAction('/api/restore', id);
-      const arch = lastBoard.archive && lastBoard.archive.windows;
-      if (arch) {
-        const i = arch.findIndex((x) => x.id === id);
-        if (i >= 0) {
-          const [w] = arch.splice(i, 1);
-          lastBoard.archive.count = arch.length;
-          (lastBoard.windows = lastBoard.windows || []).push(w);
-          // surface it in repo-grouped view immediately (next poll reconciles order)
-          lastBoard.groups = lastBoard.groups || [];
-          const key = w.repo || w.cwd || '(unknown)';
-          let g = lastBoard.groups.find((gr) => gr.repo === key);
-          if (!g) { g = { repo: key, windows: [] }; lastBoard.groups.push(g); }
-          g.windows.push(w);
-        }
+    await postAction('/api/restore', id);
+    const arch = lastBoard.archive && lastBoard.archive.windows;
+    if (arch) {
+      const i = arch.findIndex((x) => x.id === id);
+      if (i >= 0) {
+        const [w] = arch.splice(i, 1);
+        lastBoard.archive.count = arch.length;
+        (lastBoard.windows = lastBoard.windows || []).push(w);
+        // surface it in repo-grouped view immediately (next poll reconciles order)
+        lastBoard.groups = lastBoard.groups || [];
+        const key = w.repo || w.cwd || '(unknown)';
+        let g = lastBoard.groups.find((gr) => gr.repo === key);
+        if (!g) { g = { repo: key, windows: [] }; lastBoard.groups.push(g); }
+        g.windows.push(w);
       }
-      view = 'main';
-      render();
     }
+    view = 'main';
+    render();
   } catch {
     btn.textContent = '失败';
     setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);

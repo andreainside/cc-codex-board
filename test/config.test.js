@@ -71,3 +71,8 @@ test('idle thresholds: config file uses hours', () => {
   assert.equal(c.idleArchiveMs, 6 * 3600_000);
   assert.equal(c.idleDropMs, 48 * 3600_000);
 });
+
+test('summary timeout: default 90s; --summary-timeout overrides (seconds)', () => {
+  assert.equal(resolveConfig({ home: '/h' }).summaryTimeoutMs, 90_000);
+  assert.equal(resolveConfig({ home: '/h', flags: { 'summary-timeout': 180 } }).summaryTimeoutMs, 180_000);
+});
