@@ -176,6 +176,31 @@ test('extractLastMessage skips trailing tool_result / non-message lines', () => 
   assert.deepEqual(extractLastMessage(lines), { role: 'assistant', text: '我来跑测试' });
 });
 
+const asstText = (t) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: t }] } });
+const asstTool = (id) => ({ type: 'assistant', message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'Bash' }] } });
+const toolResult = (id) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+const userText = (t) => ({ type: 'user', message: { role: 'user', content: t } });
+
+test('awaitingInput: assistant text ending in ? → true (unchanged)', () => {
+  assert.equal(extractAwaitingInput([asstText('Shall I proceed?')]), true);
+});
+
+test('awaitingInput: user replied after the question → false (unchanged)', () => {
+  assert.equal(extractAwaitingInput([asstText('Proceed?'), userText('yes')]), false);
+});
+
+test('awaitingInput: pending tool_use (awaiting permission) → true', () => {
+  assert.equal(extractAwaitingInput([asstText('Running a command'), asstTool('t1')]), true);
+});
+
+test('awaitingInput: tool_use resolved by tool_result, normal end → false', () => {
+  assert.equal(extractAwaitingInput([asstTool('t1'), toolResult('t1'), asstText('Done.')]), false);
+});
+
+test('awaitingInput: user typed a new prompt after an unresolved tool_use → false', () => {
+  assert.equal(extractAwaitingInput([asstTool('t1'), userText('do something else')]), false);
+});
+
 test('summarizeTranscript composes the fields from raw text', () => {
   const text = jl(
     { type: 'user', message: { role: 'user', content: '开场提问' }, timestamp: '2026-06-06T03:00:00.000Z' },

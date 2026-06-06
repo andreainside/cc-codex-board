@@ -148,30 +148,43 @@ export function extractLastActivityAt(lines) {
 }
 
 /**
- * Best-effort needs-you signal: the last assistant turn ended with a question,
- * i.e. it is awaiting the user's input/decision. False positives are worse than
- * false negatives, so this stays conservative (must end in a question mark).
+ * Best-effort needs-you signal. True when the session is awaiting the user:
+ *  (1) the last assistant text ended with a question, OR
+ *  (2) a tool call is still pending (no tool_result yet) — i.e. blocked on a
+ *      permission / confirmation / plan-approval prompt. deriveStatus gates this
+ *      behind !running, so a busy window with an in-flight tool stays "running".
+ * Conservative: a real user message after an unresolved tool clears the signal.
  * @param {object[]} lines
  * @returns {boolean}
  */
 export function extractAwaitingInput(lines) {
-  // Walk the transcript tracking the last *meaningful* turn — a real user
-  // prompt or an assistant text reply. If the user has already responded after
-  // the assistant's question, the last meaningful turn is the user's, so we are
-  // NOT awaiting input (avoids the false positive).
   let last = null; // { role: 'assistant'|'user', text }
+  const pendingToolUse = new Set(); // tool_use ids without a later tool_result
+
   for (const o of lines) {
     if (!o) continue;
     if (o.type === 'assistant' && o.message) {
+      const c = o.message.content;
+      if (Array.isArray(c)) {
+        for (const b of c) if (b && b.type === 'tool_use' && b.id) pendingToolUse.add(b.id);
+      }
       const t = messageText(o.message).trim();
       if (t) last = { role: 'assistant', text: t };
     } else if (isUserLine(o)) {
+      const c = o.message.content;
+      if (Array.isArray(c)) {
+        for (const b of c) if (b && b.type === 'tool_result' && b.tool_use_id) pendingToolUse.delete(b.tool_use_id);
+      }
       const t = messageText(o.message).trim();
-      if (t && !isMetaUserText(t)) last = { role: 'user', text: t };
+      if (t && !isMetaUserText(t)) {
+        last = { role: 'user', text: t };
+        pendingToolUse.clear(); // user moved on; no longer blocking on a tool
+      }
     }
   }
-  if (!last || last.role !== 'assistant') return false;
-  return /[?？]$/.test(last.text.trimEnd());
+
+  if (last && last.role === 'assistant' && /[?？]$/.test(last.text.trimEnd())) return true;
+  return pendingToolUse.size > 0;
 }
 
 /**
