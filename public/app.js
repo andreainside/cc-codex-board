@@ -17,6 +17,16 @@ let lastError = null;
 let view = 'main';
 let grouping = localStorage.getItem('ccb-grouping') === 'status' ? 'status' : 'repo';
 let focus = localStorage.getItem('ccb-focus') === '1';
+let editing = false;
+
+function loadNotes() {
+  const m = {};
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('ccb-note:')) m[k.slice('ccb-note:'.length)] = localStorage.getItem(k);
+  }
+  return m;
+}
 
 function syncControls() {
   for (const b of groupingBtns) {
@@ -30,8 +40,8 @@ function syncControls() {
 }
 
 function render() {
-  if (!lastBoard) return;
-  boardEl.innerHTML = renderBoard(lastBoard, Date.now(), { view, grouping, focus });
+  if (!lastBoard || editing) return;
+  boardEl.innerHTML = renderBoard(lastBoard, Date.now(), { view, grouping, focus, notes: loadNotes() });
   if (modeHintEl) modeHintEl.textContent = usageHint(lastBoard.meta);
   syncControls();
 }
@@ -84,7 +94,34 @@ function findWindow(id) {
 boardEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-action]');
   if (!btn || !lastBoard) return;
-  const { id, action } = btn.dataset;
+  const { id, action, session } = btn.dataset;
+
+  if (action === 'note') {
+    const box = btn.closest('.note');
+    if (!box) return;
+    const current = localStorage.getItem('ccb-note:' + session) || '';
+    editing = true;
+    box.innerHTML = '<input class="note-input" type="text" maxlength="120" />';
+    const input = box.querySelector('.note-input');
+    input.value = current;
+    input.focus();
+    input.select();
+    const save = () => {
+      if (!editing) return;
+      editing = false;
+      const v = input.value.trim();
+      if (v) localStorage.setItem('ccb-note:' + session, v);
+      else localStorage.removeItem('ccb-note:' + session);
+      render();
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+      else if (ev.key === 'Escape') { editing = false; render(); }
+    });
+    input.addEventListener('blur', save);
+    return;
+  }
+
   const orig = btn.textContent;
   btn.disabled = true;
   btn.textContent = '…';

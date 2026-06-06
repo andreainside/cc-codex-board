@@ -129,6 +129,13 @@ function renderCard(w, now, opts = {}) {
     ? `<button class="act" data-id="${escapeHtml(w.id)}" data-action="restore">↩ 恢复</button>`
     : '';
 
+  const notes = opts.notes || {};
+  const session = escapeHtml(w.sessionId || '');
+  const noteText = (w.sessionId && notes[w.sessionId]) || '';
+  const noteHtml = noteText
+    ? `<div class="note" data-session="${session}"><span class="note-text">📝 ${escapeHtml(noteText)}</span><button class="note-edit" data-action="note" data-session="${session}">✎</button></div>`
+    : `<div class="note empty" data-session="${session}"><button class="note-add" data-action="note" data-session="${session}">📝 备注…</button></div>`;
+
   // 1) headline — "what it's doing" (AI summary / PR title / branch / window title / opening prompt)
   const headline = (w.headline && w.headline.text) || w.title || '(尚无提问)';
   const isWinHeadline = w.headline && w.headline.source === 'windowtitle';
@@ -150,6 +157,7 @@ function renderCard(w, now, opts = {}) {
         <span class="status" style="color:${meta.color}">● ${escapeHtml(meta.label)}</span>
       </div>
       <div class="title">${isWinHeadline ? '🖥 ' : ''}${escapeHtml(headline)}</div>
+      ${noteHtml}
       ${subtitle}
       ${winLine}
       <div class="loc">${locationLine(w)}</div>
@@ -171,14 +179,14 @@ function summaryBar(summary) {
     </div>`;
 }
 
-function groupByStatus(windows, now) {
+function groupByStatus(windows, now, cardOpts = {}) {
   const order = ['needs-you', 'running', 'waiting-ci-review', 'idle'];
   return order
     .map((status) => {
       const ws = (windows || []).filter((w) => w.status === status);
       const m = statusMeta(status);
       const head = `<h2 class="repo" style="color:${m.color}">● ${escapeHtml(m.label)} (${ws.length})</h2>`;
-      const grid = ws.length ? `<div class="grid">${ws.map((w) => renderCard(w, now)).join('')}</div>` : '';
+      const grid = ws.length ? `<div class="grid">${ws.map((w) => renderCard(w, now, cardOpts)).join('')}</div>` : '';
       return `<section class="group">${head}${grid}</section>`;
     })
     .join('');
@@ -197,17 +205,19 @@ export function renderBoard(board, now, opts = {}) {
   const grouping = opts.grouping || 'repo';
   const focus = !!opts.focus; // when on: only needs-you + running
 
+  const cardOpts = { notes: opts.notes || {} };
+
   if (view === 'archive') {
     const ws = (board.archive && board.archive.windows) || [];
     if (!ws.length) return '<div class="empty">存档为空</div>';
-    return `<section class="group"><div class="grid">${ws.map((w) => renderCard(w, t, { archive: true })).join('')}</div></section>`;
+    return `<section class="group"><div class="grid">${ws.map((w) => renderCard(w, t, { archive: true, notes: opts.notes || {} })).join('')}</div></section>`;
   }
 
   const keep = (w) => !focus || w.status === 'needs-you' || w.status === 'running';
   const bar = board.summary ? summaryBar(board.summary) : '';
   let body;
   if (grouping === 'status') {
-    body = groupByStatus((board.windows || []).filter(keep), t);
+    body = groupByStatus((board.windows || []).filter(keep), t, cardOpts);
   } else {
     body = (board.groups || [])
       .map((g) => ({ repo: g.repo, windows: (g.windows || []).filter(keep) }))
@@ -216,7 +226,7 @@ export function renderBoard(board, now, opts = {}) {
         (g) => `
       <section class="group">
         <h2 class="repo">${escapeHtml(g.repo)}</h2>
-        <div class="grid">${g.windows.map((w) => renderCard(w, t)).join('')}</div>
+        <div class="grid">${g.windows.map((w) => renderCard(w, t, cardOpts)).join('')}</div>
       </section>`,
       )
       .join('');

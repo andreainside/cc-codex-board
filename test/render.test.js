@@ -177,3 +177,18 @@ test('renderBoard focus shows only needs-you + running (repo & status)', () => {
   assert.ok(status.includes('data-id="a"') && status.includes('data-id="d"'));
   assert.ok(!status.includes('data-id="b"') && !status.includes('data-id="c"'));
 });
+
+test('renderBoard threads notes; card shows note + data-session', () => {
+  const board = { summary: { total: 1, counts: {} }, windows: [], groups: [{ repo: 'r', windows: [{ id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'x' }] }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now(), { notes: { s1: '等 Bob review' } });
+  assert.match(html, /等 Bob review/);
+  assert.match(html, /data-session="s1"/);
+  assert.match(html, /data-action="note"/);
+});
+
+test('renderBoard shows note placeholder when no note', () => {
+  const board = { summary: { total: 1, counts: {} }, windows: [], groups: [{ repo: 'r', windows: [{ id: 'cc:1', sessionId: 's2', tool: 'CC', status: 'idle', title: 'x' }] }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now(), { notes: {} });
+  assert.match(html, /备注…/);
+  assert.match(html, /data-session="s2"/);
+});
