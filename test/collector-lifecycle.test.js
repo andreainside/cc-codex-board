@@ -5,11 +5,6 @@ import { buildBoard, classifyZone } from '../src/collector.js';
 const H = 3600_000;
 const NOW = 1_000_000_000_000;
 
-// A CC window that is idle, with lastActivityAt `ageH` hours ago.
-function idleCc(id, ageH) {
-  return { pid: Number(id.split(':')[1]), id };
-}
-
 async function build(extra = {}) {
   // Inject a fake collector path by stubbing claude/codex roots off and feeding
   // windows through a minimal monkey of buildBoard deps is not possible directly;

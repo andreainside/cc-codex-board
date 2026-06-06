@@ -1,7 +1,7 @@
 {
   "name": "cc-codex-board",
   "version": "0.2.0",
-  "description": "Local read-only dashboard for live Claude Code & Codex windows. Zero LLM calls.",
+  "description": "Local read-only dashboard for live Claude Code & Codex windows. Zero LLM calls by default.",
   "type": "module",
   "bin": {
     "cc-codex-board": "bin/cc-codex-board.js"
