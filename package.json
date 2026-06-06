@@ -1,0 +1,37 @@
+{
+  "name": "cc-codex-board",
+  "version": "0.1.0",
+  "description": "Local read-only dashboard for live Claude Code & Codex windows. Zero LLM calls.",
+  "type": "module",
+  "bin": {
+    "cc-codex-board": "bin/cc-codex-board.js"
+  },
+  "scripts": {
+    "start": "node bin/cc-codex-board.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "config.example.json",
+    "README.md"
+  ],
+  "keywords": [
+    "claude-code",
+    "codex",
+    "dashboard",
+    "cli",
+    "local"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andreainside/cc-codex-board.git"
+  },
+  "homepage": "https://github.com/andreainside/cc-codex-board#readme",
+  "author": "Andrea Zhang",
+  "license": "MIT"
+}

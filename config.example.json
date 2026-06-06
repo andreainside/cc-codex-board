@@ -1,0 +1,16 @@
+{
+  "port": 4317,
+  "localTtlMs": 5000,
+  "gitTtlMs": 45000,
+  "runningRecencyMs": 90000,
+  "codexActiveWindowMs": 7200000,
+  "titleMax": 90,
+  "git": true,
+  "gh": true,
+  "summary": false,
+  "summaryModel": "claude-haiku-4-5",
+  "labels": {
+    "12345": "Alice",
+    "/Users/you/path/to/worktree": "review-bot"
+  }
+}

@@ -1,0 +1,126 @@
+// OPTIONAL AI headline generator. Off by default — the board is zero-LLM unless
+// this is explicitly enabled. When on, it shells out to the local `claude -p`
+// (print/headless) which runs on the user's CC SUBSCRIPTION (OAuth), not the
+// pay-per-token API. To stay cheap and rate-limit friendly it only summarizes a
+// window when its turn completes (running → idle, or first sighting while idle),
+// caches per turn, and falls back silently to the non-LLM headline on any error.
+
+import { execFile } from 'node:child_process';
+
+const DEFAULT_MODEL = 'claude-haiku-4-5';
+const DEFAULT_MAX_LEN = 24;
+const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_CONCURRENCY = 3;
+
+function defaultExec(file, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout);
+    });
+  });
+}
+
+/** Build the (bounded) prompt asking for a short "what is this doing" title. */
+export function buildSummaryPrompt(window) {
+  const clip = (s, n) => (typeof s === 'string' ? s.slice(0, n) : '');
+  const lastMsg = window.lastMessage ? clip(window.lastMessage.text, 200) : '';
+  return [
+    'Title this coding session for a dashboard. In <= 8 words (or <= 16 Chinese characters),',
+    'say what it is working on right now. Output ONLY the title — no quotes, no preamble.',
+    '',
+    `Opening request: ${clip(window.title, 300)}`,
+    `Latest instruction: ${clip(window.currentActivity, 300)}`,
+    lastMsg ? `Latest message: ${lastMsg}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Clean the model output into a tidy single-line title. */
+export function parseSummaryOutput(stdout, opts = {}) {
+  const maxLen = opts.maxLen ?? DEFAULT_MAX_LEN;
+  if (!stdout) return '';
+  let line = String(stdout).split('\n').map((l) => l.trim()).find((l) => l.length > 0) || '';
+  line = line.replace(/^["'“”『「]+/, '').replace(/["'“”』」]+$/, '').trim();
+  if (line.length > maxLen) line = line.slice(0, maxLen);
+  return line;
+}
+
+// A window has "advanced" (needs a fresh summary) whenever its last activity
+// timestamp changes — that marks a new completed turn.
+function signatureOf(window) {
+  return String(window.lastActivityAt ?? window.startedAt ?? '');
+}
+
+/**
+ * @param {{enabled:boolean, model?:string, exec?:Function, maxLen?:number,
+ *   timeoutMs?:number, concurrency?:number}} opts
+ */
+export function createSummarizer({
+  enabled,
+  model = DEFAULT_MODEL,
+  exec = defaultExec,
+  maxLen = DEFAULT_MAX_LEN,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  concurrency = DEFAULT_CONCURRENCY,
+  now = () => Date.now(),
+  retryBackoffMs = 60_000,
+} = {}) {
+  const cache = new Map(); // id -> { signature, title }   (successful summaries)
+  const failed = new Map(); // id -> { signature, at }      (last failure, for backoff)
+  const inflight = new Set(); // id currently summarizing
+  let active = 0;
+
+  function getTitle(window) {
+    const hit = cache.get(window.id);
+    if (hit && hit.signature === signatureOf(window)) return hit.title;
+    return null;
+  }
+
+  async function runSummary(window) {
+    const sig = signatureOf(window);
+    inflight.add(window.id);
+    active += 1;
+    try {
+      const args = ['-p', '--model', model, buildSummaryPrompt(window)];
+      const stdout = await exec('claude', args, timeoutMs);
+      const title = parseSummaryOutput(stdout, { maxLen });
+      if (title) {
+        cache.set(window.id, { signature: sig, title });
+        failed.delete(window.id);
+        return title;
+      }
+      failed.set(window.id, { signature: sig, at: now() });
+      return null;
+    } catch {
+      failed.set(window.id, { signature: sig, at: now() }); // back off; don't hammer a broken claude
+      return null; // fall back to the non-LLM headline; never poison the cache
+    } finally {
+      inflight.delete(window.id);
+      active -= 1;
+    }
+  }
+
+  /**
+   * Summarize an idle window that has no summary for its current turn. Eligible
+   * windows beyond the concurrency cap are skipped and naturally retried on the
+   * next refresh (so a startup burst staggers out instead of being dropped).
+   * Returns the in-progress Promise when it triggers work, else null.
+   */
+  function schedule(window) {
+    if (!enabled) return null;
+    if (window.status === 'running') return null; // only summarize completed turns
+    if (getTitle(window) !== null) return null; // already summarized this turn
+    if (inflight.has(window.id)) return null;
+
+    const sig = signatureOf(window);
+    const f = failed.get(window.id);
+    if (f && f.signature === sig && now() - f.at < retryBackoffMs) return null; // within backoff
+
+    if (active >= concurrency) return null; // shed; retried next refresh as slots free
+    return runSummary(window);
+  }
+
+  return { enabled, getTitle, schedule };
+}
