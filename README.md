@@ -21,6 +21,8 @@ cd cc-codex-board
 node bin/cc-codex-board.js --open      # or: npm start
 ```
 
+**Upgrading:** `npx github:...` always pulls the latest `main` on restart — just restart the command. Clone users: `git pull`, then restart.
+
 **For colleagues:** it just reads your own `~/.claude` / `~/.codex` and runs read-only `git`/`gh`. Optional bits: install [`gh`](https://cli.github.com) and `gh auth login` for PR/CI/review status; on macOS the first run may ask to allow controlling Terminal (to read terminal tab titles — say yes, or `--no-terminal-titles`); and since everyone has a CC plan, `--summary` gives AI headlines using your own subscription.
 
 ## What it shows
@@ -28,6 +30,11 @@ node bin/cc-codex-board.js --open      # or: npm start
 - **Summary bar** — counts per status (`2 等你 · 2 跑着 · 1 等CI/复评 · 1 空闲`).
 - **Grouped by repo**, card grid, **left color stripe by status**, **needs-you pinned to top**.
 - Auto-refreshes every 5s with an "updated Ns ago" indicator.
+- **✨ 总结 button** on every card — click to request an on-demand AI title for that window (uses your local `claude -p`, click = consent; works even without `--summary`).
+- **Idle lifecycle:** windows idle for more than 4h move to a **🗄 存档** (archive) view instead of cluttering the main board; windows idle more than 30h are dropped entirely. Each archived card shows how long it has been idle and has an **↩ 恢复** button that moves it back to the main view instantly.
+- **按仓库 / 按状态 toggle** — switch between repo-grouped and status-grouped layout; preference is remembered in `localStorage`.
+- **专注 filter** — one click hides 空闲 and 等CI/复评 windows, showing only 等你 and 跑着; persists across refreshes.
+- **Top bar LLM usage** — shows real call count, total tokens, and cost accumulated this session (`0 次 LLM 调用` until a summary actually runs).
 
 Each card has a three-level title so you can both understand and *locate* the window:
 
@@ -72,13 +79,15 @@ A single local Node service = collector + static page.
 Optional `config.json` (see `config.example.json`) or `~/.cc-codex-board.json`. Flags override the file:
 
 ```
---port <n>          port (default 4317)
---config <path>     config JSON path
---claude-root <dir> override ~/.claude
---codex-root <dir>  override ~/.codex
---no-git            skip git (no branch/repo)
---no-gh             skip gh (no PR/CI/review)
---open              open the browser
+--port <n>           port (default 4317)
+--config <path>      config JSON path
+--claude-root <dir>  override ~/.claude
+--codex-root <dir>   override ~/.codex
+--no-git             skip git (no branch/repo)
+--no-gh              skip gh (no PR/CI/review)
+--idle-archive <h>   idle windows older than h hours → archive view (default 4; 0 disables)
+--idle-drop <h>      idle windows older than h hours → dropped entirely (default 30; 0 = keep forever)
+--open               open the browser
 ```
 
 Friendly labels (e.g. a teammate's bot) map a `pid` or `cwd` to a name:
@@ -98,6 +107,17 @@ npm test    # node --test, no dependencies
 ```
 
 Unit tests cover every parser (CC sessions, transcript title/last-prompt/pr-link/timestamps, Codex rollouts, status derivation, `gh` JSON, repo mapping, TTL cache, config); an integration test drives the collector over a fixture `~/.claude` + `~/.codex` tree; a frontend test renders from a sample `/api/windows` payload.
+
+## Changelog
+
+### 0.2.0
+
+- **Needs-you fix:** `等你` now also triggers when a tool call is pending (awaiting a permission / confirmation prompt), not only when the last assistant message ends with a question.
+- **LLM usage counter:** the top bar shows real call count, total tokens, and cost for this session; honest `0 次 LLM 调用` until a summary actually runs.
+- **✨ 总结 button:** every card has an on-demand manual AI summary button — works even without `--summary`; the click is the per-window consent.
+- **Idle lifecycle + ↩ 恢复:** windows idle >4h move to 🗄 存档; >30h are dropped. Archived cards show idle age and a restore button. Thresholds configurable via `--idle-archive` / `--idle-drop` (0 disables each).
+- **按仓库 / 按状态 toggle:** switch between repo-grouped and status-grouped layout with localStorage persistence.
+- **专注 filter:** one-click mode that hides 空闲 and 等CI/复评, showing only 等你 and 跑着.
 
 ## License
 

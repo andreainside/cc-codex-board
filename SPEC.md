@@ -9,7 +9,7 @@ People run many CC and Codex windows at once and lose track of which is which. T
 Read-only live snapshot dashboard. Per-person, runs locally. macOS/Linux, Node ≥ 18, no dependencies.
 
 ### Non-goals
-- **No actions** (no focus/merge/trigger). Read-only.
+- **Minimal actions only.** Two explicit local actions are supported: (1) on-demand manual summarize (calls `claude -p` on the user's subscription — click is the user's consent; never writes transcripts or repos), and (2) restore from archive (changes in-memory view state only — never writes transcripts or repos). All other write actions (focus/merge/trigger/etc.) are out of scope.
 - No persistence/history DB — live snapshot only.
 - No multi-user hosting — each person runs their own.
 
@@ -49,13 +49,19 @@ A single local Node service = **collector** + **static web page**.
 - `startedAt`, `runningDuration`, `lastActivityAt`, `repo` (grouping key)
 
 ## Status taxonomy + priority
-1. **needs-you** (red, pinned): idle **and** the last turn ended awaiting the user (conservative — false positives are worse than false negatives).
+1. **needs-you** (red, pinned): idle **and** the last turn ended awaiting the user. Triggered by either (a) the last assistant message ending with a question, or (b) a tool call that is pending with no `tool_result` yet — i.e. blocked on a permission / confirmation prompt. Conservative — false positives are worse than false negatives.
 2. **running** (blue): raw status running/busy, or very recent activity.
 3. **waiting-ci-review** (amber): PR open with CI or review pending.
 4. **idle** (gray).
 
 ## Layout
 Top summary bar (counts per status) · grouped by repo · card grid · left color stripe by status · needs-you pinned to top · auto-refresh with "updated Ns ago".
+
+**View controls:** 按仓库 / 按状态 toggle (localStorage); 专注 filter (hides 空闲 + 等CI/复评, localStorage); 🗄 存档 view (idle-archived windows, each with idle-age label and ↩ 恢复 button).
+
+**Idle lifecycle:** idle windows are promoted out of the main view based on effective idle age (= `max(lastActivityAt, startedAt, restoredAt)`): `< idleArchiveMs` (default 4h) → main; `≥ idleArchiveMs` and `< idleDropMs` (default 30h) → archive; `≥ idleDropMs` → dropped (omitted from payload). Both thresholds are configurable via `--idle-archive <h>` / `--idle-drop <h>`; 0 disables the respective tier. Non-idle windows (needs-you, running, waiting-ci-review) are never archived.
+
+**LLM usage counter:** `meta.llmUsage { calls, inputTokens, outputTokens, costUsd }` is included in every `/api/windows` payload; it accumulates across on-demand and auto-summary calls this server session and is displayed in the top bar.
 
 ## Optional AI headline (`--summary`)
 Off by default. When enabled, the headline is a short AI one-liner from the local `claude -p` on the user's CC subscription. To stay cheap and rate-limit-friendly it:
