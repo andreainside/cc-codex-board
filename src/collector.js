@@ -29,6 +29,22 @@ export function encodeCwd(cwd) {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+/**
+ * Decide which zone a window belongs to by effective idle age.
+ * @param {{id:string,status:string,lastActivityAt?:number,startedAt?:number}} w
+ * @param {{now:number,idleArchiveMs:number,idleDropMs:number,getRestoredAt:(id:string)=>number}} opts
+ * @returns {'main'|'archive'|'dropped'}
+ */
+export function classifyZone(w, opts) {
+  if (w.status !== 'idle') return 'main';
+  if (!opts.idleArchiveMs) return 'main';
+  const eff = Math.max(w.lastActivityAt || 0, w.startedAt || 0, opts.getRestoredAt(w.id) || 0);
+  const age = opts.now - eff;
+  if (age < opts.idleArchiveMs) return 'main';
+  if (opts.idleDropMs && age > opts.idleDropMs) return 'dropped';
+  return 'archive';
+}
+
 /** Collapse Codex resume chains: keep the most recent rollout per root thread. */
 export function dedupeCodexThreads(summaries) {
   const byRoot = new Map();
@@ -343,20 +359,11 @@ export async function buildBoard(deps) {
   }
 
   // Idle lifecycle: bucket idle windows by effective idle age.
-  // effectiveActivity = max(real activity, manual restore time).
-  const effectiveActivity = (w) => Math.max(w.lastActivityAt || 0, w.startedAt || 0, getRestoredAt(w.id) || 0);
-  const zoneFor = (w) => {
-    if (w.status !== 'idle') return 'main';
-    if (!idleArchiveMs) return 'main';
-    const age = now - effectiveActivity(w);
-    if (age < idleArchiveMs) return 'main';
-    if (idleDropMs && age > idleDropMs) return 'dropped';
-    return 'archive';
-  };
+  const zoneOpts = { now, idleArchiveMs, idleDropMs, getRestoredAt };
   const mainWindows = [];
   const archiveWindows = [];
   for (const w of windows) {
-    const z = zoneFor(w);
+    const z = classifyZone(w, zoneOpts);
     if (z === 'main') mainWindows.push(w);
     else if (z === 'archive') archiveWindows.push(w);
     // 'dropped' → omitted from the payload entirely
