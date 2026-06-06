@@ -2,7 +2,7 @@
 
 - 日期:2026-06-06
 - 状态:待 review(实现前)
-- 范围:对已发布的 cc-codex-board 做 6 项优化(含 1 个 bug 修复)+ 一次发布(0.2.0)
+- 范围:对已发布的 cc-codex-board 做 8 项优化(含 1 个 bug 修复)+ 一次发布(0.2.0)。⑦⑧ 为纯前端增量。
 
 ## 背景 / 问题
 
@@ -29,6 +29,8 @@ cc-codex-board 是一个本地只读看板,展示所有在跑的 Claude Code / C
 - 主视图「专注」过滤:一键只看「等你 + 跑着」(隐藏空闲与等CI/复评)。
 - 顶栏显示看板自启动以来的真实 LLM 用量(调用次数 · token · 估算花费)。
 - 修复「等你」(needs-you) 漏报:CC 卡在权限/确认提示时正确显示「等你」而非把「跑着」-1。
+- 每个对话可加用户备注(localStorage,按 sessionId 存),方便辨别管理。
+- 「按仓库」视图内按文件夹 / worktree 二级分组,同文件夹的聚在一起。
 
 ## 非目标(维持原 SPEC 约束)
 
@@ -199,6 +201,39 @@ else                               zone = 'archive'
 
 ### 测试
 - `render` 单测:focus 下 repo 与 status 分组都只剩 needs-you/running 的卡片(idle、waiting-ci-review 的 `data-id` 不出现)。
+
+---
+
+## 特性 ⑦ 每对话备注(localStorage,按 sessionId)
+
+### 行为
+每张卡片在标题下方有一行备注:有备注显示 `📝 "文字" ✎`,无备注显示淡色 `📝 备注…`。点击进入行内编辑(预填当前值),**Enter / 失焦保存**、**Esc 取消**、清空即删除。在所有视图(主/存档/专注、按仓库/按状态)都显示。
+
+### 存储与键
+- 浏览器 `localStorage`,键 `ccb-note:<sessionId>`。**按 `sessionId` 存**(不是易变的 `cc:<pid>`),所以关掉/重开窗口、pid 变了备注仍在。每浏览器独立(用户选择)。
+- **纯前端,零后端、零写盘**,完全保持看板"机器上只读"。
+
+### 前端
+- `render.js`:`renderBoard`/`renderCard` 接受 `opts.notes`(`sessionId → text` 映射),纯函数渲染备注元素(带 `data-session`、`data-action="note"`);空备注渲染添加占位。
+- `app.js`:`loadNotes()` 从 localStorage 扫 `ccb-note:` 前缀构建映射,传入 `renderBoard`;board 点击委托处理 `data-action="note"` → 行内 `<input>` 预填 → Enter/失焦存 localStorage、Esc 取消 → 重渲染;编辑期间用 `editing` 标志**暂停 5s 轮询重渲染**,避免输入被清掉。
+
+### 测试
+- `render` 单测:给定 notes 映射,有备注的卡显示文字 + `data-session`;无备注显示占位;sessionId 不在映射 → 占位。
+
+---
+
+## 特性 ⑧ 「按仓库」内按文件夹 / worktree 二级分组
+
+### 行为
+仅影响 **按仓库** 视图。每个仓库组内,窗口再按 `cwd` 细分:仓库下有 **≥2 个不同文件夹** → 渲染 `📁 文件夹` 小节(worktree 各自成节);只有 **1 个文件夹** → 保持扁平(不加多余小节)。按状态 / 存档视图不变。
+
+### 前端(纯 `render.js`)
+- `folderLabel(cwd)`:取路径末 1–2 段(如 `worktrees/sleep-trend`),便于辨认 worktree;不做"(主)"标注(cwd 无法可靠判断主 checkout)。
+- `groupByFolder(windows, now, cardOpts)`:按 `cwd` 分桶(保留已排序的窗口顺序 = 状态优先级顺序);桶数 ≤1 扁平,否则按 Map 插入顺序渲染小节。
+- `renderBoard` 的 repo 分组分支用 `groupByFolder` 替换原来的扁平 grid;`cardOpts`(含 notes)透传到 `renderCard`。
+
+### 测试
+- `render` 单测:仓库组含 2 个不同 cwd → 出现 2 个 `📁` 小节标题;仅 1 个 cwd → 无小节(扁平);`folderLabel` 取末 2 段。
 
 ---
 

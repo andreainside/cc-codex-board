@@ -1300,3 +1300,258 @@ git commit -m "docs: v0.2.0 — flags, buttons, archive, usage, needs-you fix"
 **Type consistency:** payload `{ meta.llmUsage{calls,inputTokens,outputTokens,costUsd}, windows, groups, archive{count,windows} }` 在 collector(产出)、server(查找)、render(消费)、app(消费)四处一致;`summarizer` 接口 `{enabled,getTitle,schedule,summarizeNow,getUsage}` 在 NOOP/真实实例/collector/server 一致;`classifyZone(w, {now,idleArchiveMs,idleDropMs,getRestoredAt})` 在单测与 buildBoard 一致。
 
 **Placeholder scan:** 无 TBD/TODO;每个代码步骤含完整代码。唯一"实现期补"项是 Task 1 的真实 fixture(spec 已说明当前快照抓不到 awaiting 态),其余逻辑已用合成 line 数组测到。
+
+---
+
+# 增量(v0.2.x):⑦ 每对话备注 + ⑧ 文件夹二级分组(纯前端)
+
+> 这两个特性纯前端、零后端、零写盘。Task 10 先做(建立 `cardOpts`/`opts.notes` 透传),Task 11 复用 `cardOpts`。
+
+## Task 10: 每对话备注(localStorage,按 sessionId)
+
+**Files:**
+- Modify: `public/render.js`(`renderCard`/`groupByStatus`/`renderBoard` 接 `opts.notes`)
+- Modify: `public/app.js`(`loadNotes`、`editing` 守卫、note 编辑交互)
+- Modify: `public/styles.css`
+- Test: `test/render.test.js`
+
+- [ ] **Step 1: Write failing tests** — 追加到 `test/render.test.js`:
+
+```js
+test('renderBoard threads notes; card shows note + data-session', () => {
+  const board = { summary: { total: 1, counts: {} }, windows: [], groups: [{ repo: 'r', windows: [{ id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'x' }] }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now(), { notes: { s1: '等 Bob review' } });
+  assert.match(html, /等 Bob review/);
+  assert.match(html, /data-session="s1"/);
+  assert.match(html, /data-action="note"/);
+});
+
+test('renderBoard shows note placeholder when no note', () => {
+  const board = { summary: { total: 1, counts: {} }, windows: [], groups: [{ repo: 'r', windows: [{ id: 'cc:1', sessionId: 's2', tool: 'CC', status: 'idle', title: 'x' }] }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now(), { notes: {} });
+  assert.match(html, /备注…/);
+  assert.match(html, /data-session="s2"/);
+});
+```
+
+- [ ] **Step 2: Run, verify FAIL** — `node --test test/render.test.js` → FAIL (no note markup).
+
+- [ ] **Step 3: Implement render.js** —
+(a) Change `renderCard(w, now, opts = {})` to render a note block right AFTER the `<div class="title">…</div>` line. Add this inside `renderCard` (before the `return`):
+
+```js
+  const notes = opts.notes || {};
+  const session = escapeHtml(w.sessionId || '');
+  const noteText = (w.sessionId && notes[w.sessionId]) || '';
+  const noteHtml = noteText
+    ? `<div class="note" data-session="${session}"><span class="note-text">📝 ${escapeHtml(noteText)}</span><button class="note-edit" data-action="note" data-session="${session}">✎</button></div>`
+    : `<div class="note empty" data-session="${session}"><button class="note-add" data-action="note" data-session="${session}">📝 备注…</button></div>`;
+```
+
+and insert `${noteHtml}` into the returned template immediately after the title line:
+
+```js
+      <div class="title">${isWinHeadline ? '🖥 ' : ''}${escapeHtml(headline)}</div>
+      ${noteHtml}
+      ${subtitle}
+```
+
+(b) Thread `notes` to every `renderCard` call. Change `groupByStatus(windows, now)` → `groupByStatus(windows, now, cardOpts = {})` and have it call `renderCard(w, now, cardOpts)`. In `renderBoard`, build `const cardOpts = { notes: opts.notes || {} };` and use it everywhere a card is rendered:
+- archive path: `renderCard(w, t, { archive: true, notes: opts.notes || {} })`
+- status path: `groupByStatus((board.windows || []).filter(keep), t, cardOpts)`
+- repo path: `g.windows.map((w) => renderCard(w, t, cardOpts))`
+
+- [ ] **Step 4: Run, verify PASS** — `node --test test/render.test.js` → PASS (incl. all prior render tests).
+
+- [ ] **Step 5: Implement app.js** —
+(a) After `let focus = …;` add: `let editing = false;`
+(b) Add a helper (near the top-level functions):
+
+```js
+function loadNotes() {
+  const m = {};
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('ccb-note:')) m[k.slice('ccb-note:'.length)] = localStorage.getItem(k);
+  }
+  return m;
+}
+```
+
+(c) In `render()`, guard against clobbering an open editor and pass notes:
+
+```js
+function render() {
+  if (!lastBoard || editing) return;
+  boardEl.innerHTML = renderBoard(lastBoard, Date.now(), { view, grouping, focus, notes: loadNotes() });
+  if (modeHintEl) modeHintEl.textContent = usageHint(lastBoard.meta);
+  syncControls();
+}
+```
+
+(d) In the `boardEl` click handler, destructure `session` and handle the note action FIRST (it neither disables nor POSTs):
+
+```js
+boardEl.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn || !lastBoard) return;
+  const { id, action, session } = btn.dataset;
+
+  if (action === 'note') {
+    const box = btn.closest('.note');
+    if (!box) return;
+    const current = localStorage.getItem('ccb-note:' + session) || '';
+    editing = true;
+    box.innerHTML = '<input class="note-input" type="text" maxlength="120" />';
+    const input = box.querySelector('.note-input');
+    input.value = current;
+    input.focus();
+    input.select();
+    const save = () => {
+      if (!editing) return;
+      editing = false;
+      const v = input.value.trim();
+      if (v) localStorage.setItem('ccb-note:' + session, v);
+      else localStorage.removeItem('ccb-note:' + session);
+      render();
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+      else if (ev.key === 'Escape') { editing = false; render(); }
+    });
+    input.addEventListener('blur', save);
+    return;
+  }
+
+  // …existing summarize / restore handling unchanged below…
+```
+
+(Keep the existing summarize/restore branches exactly as they are, after this note branch.)
+
+- [ ] **Step 6: styles.css** — append:
+
+```css
+.note { margin: 4px 0 2px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.note.empty { opacity: 0.55; }
+.note-text { color: #555; }
+.note-edit, .note-add { font: inherit; font-size: 12px; border: none; background: none; cursor: pointer; color: #888; padding: 0; }
+.note-edit:hover, .note-add:hover { color: #06c; }
+.note-input { font: inherit; font-size: 12px; width: 100%; padding: 2px 6px; border: 1px solid #06c; border-radius: 5px; }
+```
+
+- [ ] **Step 7: Verify + smoke** — `npm test` (render count +2; suite green). Start server (`node bin/cc-codex-board.js --port 4420 &`; sleep 1), `curl -s http://127.0.0.1:4420/app.js | grep -c "ccb-note:"` → ≥1; `curl -s http://127.0.0.1:4420/render.js | grep -c "data-action=\\"note\\""` → ≥1; kill server.
+
+- [ ] **Step 8: Commit** — `git add public/render.js public/app.js public/styles.css test/render.test.js && git commit -m "feat: per-conversation notes (localStorage, keyed by sessionId)"`
+
+---
+
+## Task 11: 「按仓库」内按文件夹 / worktree 二级分组
+
+**Files:**
+- Modify: `public/render.js`(`folderLabel` 导出、`groupByFolder`、repo 分支改用它)
+- Modify: `public/styles.css`
+- Test: `test/render.test.js`
+
+- [ ] **Step 1: Write failing tests** — 追加到 `test/render.test.js`(import 行加上 `folderLabel`):
+
+```js
+test('folderLabel returns last two path segments', () => {
+  assert.equal(folderLabel('/a/b/c/worktrees/x'), 'worktrees/x');
+  assert.equal(folderLabel('/only'), 'only');
+});
+
+test('renderBoard repo view sub-groups by folder when >1 cwd', () => {
+  const ws = [
+    { id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'A', cwd: '/Users/me/proj/worktrees/feat-a' },
+    { id: 'cc:2', sessionId: 's2', tool: 'CC', status: 'idle', title: 'B', cwd: '/Users/me/proj/main' },
+  ];
+  const board = { summary: { total: 2, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now());
+  assert.match(html, /worktrees\/feat-a/);
+  assert.match(html, /proj\/main/);
+  assert.match(html, /class="folder"/);
+});
+
+test('renderBoard repo view stays flat with a single cwd', () => {
+  const ws = [
+    { id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'A', cwd: '/Users/me/proj/main' },
+    { id: 'cc:2', sessionId: 's2', tool: 'CC', status: 'running', title: 'B', cwd: '/Users/me/proj/main' },
+  ];
+  const board = { summary: { total: 2, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now());
+  assert.ok(!html.includes('class="folder"'), 'no folder sub-header for a single cwd');
+});
+```
+
+- [ ] **Step 2: Run, verify FAIL** — `node --test test/render.test.js` → FAIL (`folderLabel` not exported / no `.folder`).
+
+- [ ] **Step 3: Implement render.js** —
+(a) Add exports/helpers (near `groupByStatus`):
+
+```js
+/** Short, readable folder label from a cwd: last 1–2 path segments. */
+export function folderLabel(cwd) {
+  if (!cwd) return '(unknown)';
+  const segs = String(cwd).split('/').filter(Boolean);
+  return segs.slice(-2).join('/') || String(cwd);
+}
+
+// Sub-group a repo's windows by cwd. ≤1 distinct cwd → flat grid; otherwise
+// one 📁 sub-section per folder, in window order (already status-sorted).
+function groupByFolder(windows, now, cardOpts) {
+  const byCwd = new Map();
+  for (const w of windows) {
+    const key = w.cwd || '(unknown)';
+    if (!byCwd.has(key)) byCwd.set(key, []);
+    byCwd.get(key).push(w);
+  }
+  if (byCwd.size <= 1) {
+    return `<div class="grid">${windows.map((w) => renderCard(w, now, cardOpts)).join('')}</div>`;
+  }
+  return [...byCwd.entries()]
+    .map(
+      ([cwd, ws]) => `
+      <div class="subgroup">
+        <h3 class="folder">📁 ${escapeHtml(folderLabel(cwd))}</h3>
+        <div class="grid">${ws.map((w) => renderCard(w, now, cardOpts)).join('')}</div>
+      </div>`,
+    )
+    .join('');
+}
+```
+
+(b) In `renderBoard`'s repo branch, replace the inner `<div class="grid">…</div>` with `${groupByFolder(g.windows, t, cardOpts)}`:
+
+```js
+    body = (board.groups || [])
+      .map((g) => ({ repo: g.repo, windows: (g.windows || []).filter(keep) }))
+      .filter((g) => g.windows.length)
+      .map(
+        (g) => `
+      <section class="group">
+        <h2 class="repo">${escapeHtml(g.repo)}</h2>
+        ${groupByFolder(g.windows, t, cardOpts)}
+      </section>`,
+      )
+      .join('');
+```
+
+- [ ] **Step 4: Run, verify PASS** — `node --test test/render.test.js` → PASS (incl. prior).
+
+- [ ] **Step 5: styles.css** — append:
+
+```css
+.subgroup { margin: 6px 0 10px; }
+.folder { font-size: 12px; font-weight: 600; color: #777; margin: 6px 0 4px; padding-left: 2px; }
+```
+
+- [ ] **Step 6: Verify + smoke** — `npm test` (render count +3; suite green). Start server, `curl -s http://127.0.0.1:4421/render.js | grep -c "groupByFolder"` → ≥1; kill.
+
+- [ ] **Step 7: Commit** — `git add public/render.js public/styles.css test/render.test.js && git commit -m "feat: sub-group repo view by folder/worktree (cwd)"`
+
+---
+
+## Self-Review(⑦⑧ 增量)
+- ⑦ 备注 → Task 10(render notes 透传 + app.js localStorage 编辑 + editing 守卫)。纯前端,键 `ccb-note:<sessionId>`。
+- ⑧ 文件夹分组 → Task 11(folderLabel + groupByFolder,仅 repo 视图,≥2 cwd 才分小节)。
+- 一致性:`cardOpts.notes` 由 renderBoard 统一构造并透传到 status/repo/archive 三路 + groupByFolder;Task 10 先落,Task 11 复用。两者都不动后端/payload。
