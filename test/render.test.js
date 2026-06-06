@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderBoard, formatDuration, relativeTime, statusMeta, escapeHtml } from '../public/render.js';
+import { renderBoard, formatDuration, relativeTime, statusMeta, escapeHtml, folderLabel } from '../public/render.js';
 
 test('formatDuration renders hours and minutes compactly', () => {
   assert.equal(formatDuration(3 * 3600_000 + 12 * 60_000), '3h12m');
@@ -191,4 +191,31 @@ test('renderBoard shows note placeholder when no note', () => {
   const html = renderBoard(board, Date.now(), { notes: {} });
   assert.match(html, /备注…/);
   assert.match(html, /data-session="s2"/);
+});
+
+test('folderLabel returns last two path segments', () => {
+  assert.equal(folderLabel('/a/b/c/worktrees/x'), 'worktrees/x');
+  assert.equal(folderLabel('/only'), 'only');
+});
+
+test('renderBoard repo view sub-groups by folder when >1 cwd', () => {
+  const ws = [
+    { id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'A', cwd: '/Users/me/proj/worktrees/feat-a' },
+    { id: 'cc:2', sessionId: 's2', tool: 'CC', status: 'idle', title: 'B', cwd: '/Users/me/proj/main' },
+  ];
+  const board = { summary: { total: 2, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now());
+  assert.match(html, /worktrees\/feat-a/);
+  assert.match(html, /proj\/main/);
+  assert.match(html, /class="folder"/);
+});
+
+test('renderBoard repo view stays flat with a single cwd', () => {
+  const ws = [
+    { id: 'cc:1', sessionId: 's1', tool: 'CC', status: 'idle', title: 'A', cwd: '/Users/me/proj/main' },
+    { id: 'cc:2', sessionId: 's2', tool: 'CC', status: 'running', title: 'B', cwd: '/Users/me/proj/main' },
+  ];
+  const board = { summary: { total: 2, counts: {} }, windows: ws, groups: [{ repo: 'r', windows: ws }], archive: { windows: [] } };
+  const html = renderBoard(board, Date.now());
+  assert.ok(!html.includes('class="folder"'), 'no folder sub-header for a single cwd');
 });

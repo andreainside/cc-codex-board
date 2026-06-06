@@ -179,6 +179,36 @@ function summaryBar(summary) {
     </div>`;
 }
 
+/** Short, readable folder label from a cwd: last 1–2 path segments. */
+export function folderLabel(cwd) {
+  if (!cwd) return '(unknown)';
+  const segs = String(cwd).split('/').filter(Boolean);
+  return segs.slice(-2).join('/') || String(cwd);
+}
+
+// Sub-group a repo's windows by cwd. ≤1 distinct cwd → flat grid; otherwise
+// one 📁 sub-section per folder, in window order (already status-sorted).
+function groupByFolder(windows, now, cardOpts) {
+  const byCwd = new Map();
+  for (const w of windows) {
+    const key = w.cwd || '(unknown)';
+    if (!byCwd.has(key)) byCwd.set(key, []);
+    byCwd.get(key).push(w);
+  }
+  if (byCwd.size <= 1) {
+    return `<div class="grid">${windows.map((w) => renderCard(w, now, cardOpts)).join('')}</div>`;
+  }
+  return [...byCwd.entries()]
+    .map(
+      ([cwd, ws]) => `
+      <div class="subgroup">
+        <h3 class="folder">📁 ${escapeHtml(folderLabel(cwd))}</h3>
+        <div class="grid">${ws.map((w) => renderCard(w, now, cardOpts)).join('')}</div>
+      </div>`,
+    )
+    .join('');
+}
+
 function groupByStatus(windows, now, cardOpts = {}) {
   const order = ['needs-you', 'running', 'waiting-ci-review', 'idle'];
   return order
@@ -226,7 +256,7 @@ export function renderBoard(board, now, opts = {}) {
         (g) => `
       <section class="group">
         <h2 class="repo">${escapeHtml(g.repo)}</h2>
-        <div class="grid">${g.windows.map((w) => renderCard(w, t, cardOpts)).join('')}</div>
+        ${groupByFolder(g.windows, t, cardOpts)}
       </section>`,
       )
       .join('');
