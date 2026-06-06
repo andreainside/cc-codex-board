@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSummaryPrompt, parseSummaryOutput, createSummarizer } from '../src/summarizer.js';
+import { buildSummaryPrompt, parseSummaryOutput, createSummarizer, parseClaudeResult } from '../src/summarizer.js';
 
 test('buildSummaryPrompt includes the opening request and latest activity, bounded', () => {
   const p = buildSummaryPrompt({ title: '修复登录 bug', currentActivity: '加上单元测试', lastMessage: { role: 'assistant', text: '测试通过了' } });
@@ -119,4 +119,37 @@ test('disabled summarizer never execs', async () => {
   const s = createSummarizer({ enabled: false, exec: makeExec(log) });
   assert.equal(s.schedule({ id: 'cc:7', status: 'idle', lastActivityAt: 1, title: 't' }), null);
   assert.equal(log.length, 0);
+});
+
+// Task 2: capture real token usage
+
+test('parseClaudeResult: parses JSON result + usage', () => {
+  const stdout = JSON.stringify({
+    result: '修复登录态刷新',
+    total_cost_usd: 0.0123,
+    usage: { input_tokens: 100, cache_read_input_tokens: 50, output_tokens: 20 },
+  });
+  const r = parseClaudeResult(stdout, { maxLen: 24 });
+  assert.equal(r.title, '修复登录态刷新');
+  assert.equal(r.usage.inputTokens, 150);
+  assert.equal(r.usage.outputTokens, 20);
+  assert.equal(r.usage.costUsd, 0.0123);
+});
+
+test('parseClaudeResult: non-JSON falls back to plain title, no usage', () => {
+  const r = parseClaudeResult('just a title\n', { maxLen: 24 });
+  assert.equal(r.title, 'just a title');
+  assert.equal(r.usage, null);
+});
+
+test('summarizer accumulates usage across calls', async () => {
+  const stdout = JSON.stringify({ result: 'x', total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5 } });
+  const s = createSummarizer({ enabled: true, exec: async () => stdout, retryBackoffMs: 0 });
+  await s.schedule({ id: 'a', status: 'idle', lastActivityAt: 1, title: 't' });
+  await s.schedule({ id: 'b', status: 'idle', lastActivityAt: 2, title: 't' });
+  const u = s.getUsage();
+  assert.equal(u.calls, 2);
+  assert.equal(u.inputTokens, 20);
+  assert.equal(u.outputTokens, 10);
+  assert.ok(Math.abs(u.costUsd - 0.02) < 1e-9);
 });

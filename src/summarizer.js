@@ -47,6 +47,29 @@ export function parseSummaryOutput(stdout, opts = {}) {
   return line;
 }
 
+/**
+ * Parse `claude -p --output-format json` stdout into { title, usage }.
+ * Falls back to treating stdout as a plain-text title (usage:null) if not JSON.
+ * @param {string} stdout
+ * @param {{maxLen?:number}} [opts]
+ */
+export function parseClaudeResult(stdout, opts = {}) {
+  const maxLen = opts.maxLen ?? DEFAULT_MAX_LEN;
+  if (!stdout) return { title: '', usage: null };
+  let obj = null;
+  try { obj = JSON.parse(stdout); } catch { obj = null; }
+  if (obj && typeof obj === 'object' && (typeof obj.result === 'string' || obj.usage)) {
+    const u = obj.usage || {};
+    const usage = {
+      inputTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
+      outputTokens: u.output_tokens || 0,
+      costUsd: typeof obj.total_cost_usd === 'number' ? obj.total_cost_usd : 0,
+    };
+    return { title: parseSummaryOutput(obj.result || '', { maxLen }), usage };
+  }
+  return { title: parseSummaryOutput(stdout, { maxLen }), usage: null };
+}
+
 // A window has "advanced" (needs a fresh summary) whenever its last activity
 // timestamp changes — that marks a new completed turn.
 function signatureOf(window) {
@@ -72,6 +95,17 @@ export function createSummarizer({
   const inflight = new Set(); // id currently summarizing
   let active = 0;
 
+  const totals = { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  function recordUsage(usage) {
+    totals.calls += 1;
+    if (usage) {
+      totals.inputTokens += usage.inputTokens || 0;
+      totals.outputTokens += usage.outputTokens || 0;
+      totals.costUsd += usage.costUsd || 0;
+    }
+  }
+  function getUsage() { return { ...totals }; }
+
   function getTitle(window) {
     const hit = cache.get(window.id);
     if (hit && hit.signature === signatureOf(window)) return hit.title;
@@ -83,9 +117,10 @@ export function createSummarizer({
     inflight.add(window.id);
     active += 1;
     try {
-      const args = ['-p', '--model', model, buildSummaryPrompt(window)];
+      const args = ['-p', '--output-format', 'json', '--model', model, buildSummaryPrompt(window)];
       const stdout = await exec('claude', args, timeoutMs);
-      const title = parseSummaryOutput(stdout, { maxLen });
+      const { title, usage } = parseClaudeResult(stdout, { maxLen });
+      recordUsage(usage);
       if (title) {
         cache.set(window.id, { signature: sig, title });
         failed.delete(window.id);
@@ -122,5 +157,5 @@ export function createSummarizer({
     return runSummary(window);
   }
 
-  return { enabled, getTitle, schedule };
+  return { enabled, getTitle, schedule, getUsage };
 }
