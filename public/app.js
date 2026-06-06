@@ -103,6 +103,12 @@ boardEl.addEventListener('click', async (e) => {
           const [w] = arch.splice(i, 1);
           lastBoard.archive.count = arch.length;
           (lastBoard.windows = lastBoard.windows || []).push(w);
+          // surface it in repo-grouped view immediately (next poll reconciles order)
+          lastBoard.groups = lastBoard.groups || [];
+          const key = w.repo || w.cwd || '(unknown)';
+          let g = lastBoard.groups.find((gr) => gr.repo === key);
+          if (!g) { g = { repo: key, windows: [] }; lastBoard.groups.push(g); }
+          g.windows.push(w);
         }
       }
       view = 'main';
