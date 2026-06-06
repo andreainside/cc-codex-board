@@ -59,6 +59,10 @@ Top summary bar (counts per status) · grouped by repo · card grid · left colo
 
 **View controls:** 按仓库 / 按状态 toggle (localStorage); 专注 filter (hides 空闲 + 等CI/复评, localStorage); 🗄 存档 view (idle-archived windows, each with idle-age label and ↩ 恢复 button).
 
+**Per-card user notes:** each card exposes an editable `📝` note field below its headline. Notes are stored in the browser's `localStorage` keyed by the session's `sessionId`; they survive page reloads and server restarts but are browser-local and never written to disk (the board stays read-only).
+
+**Folder / worktree sub-grouping (按仓库 view only):** when a repo has windows in more than one working directory (e.g. separate git worktrees), the 按仓库 view nests each folder as a `📁` sub-section within the repo group. Repos with a single folder remain flat. 按状态 and 存档 views are unaffected.
+
 **Idle lifecycle:** idle windows are promoted out of the main view based on effective idle age (= `max(lastActivityAt, startedAt, restoredAt)`): `< idleArchiveMs` (default 4h) → main; `≥ idleArchiveMs` and `< idleDropMs` (default 30h) → archive; `≥ idleDropMs` → dropped (omitted from payload). Both thresholds are configurable via `--idle-archive <h>` / `--idle-drop <h>`; 0 disables the respective tier. Non-idle windows (needs-you, running, waiting-ci-review) are never archived.
 
 **LLM usage counter:** `meta.llmUsage { calls, inputTokens, outputTokens, costUsd }` is included in every `/api/windows` payload; it accumulates across on-demand and auto-summary calls this server session and is displayed in the top bar.

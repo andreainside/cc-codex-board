@@ -35,6 +35,8 @@ node bin/cc-codex-board.js --open      # or: npm start
 - **按仓库 / 按状态 toggle** — switch between repo-grouped and status-grouped layout; preference is remembered in `localStorage`.
 - **专注 filter** — one click hides 空闲 and 等CI/复评 windows, showing only 等你 and 跑着; persists across refreshes.
 - **Top bar LLM usage** — shows real call count, total tokens, and cost accumulated this session (`0 次 LLM 调用` until a summary actually runs).
+- **Per-conversation notes** — each card has an editable `📝` note field below its headline. Click to edit, Enter or blur saves, Esc cancels, clearing the text deletes the note. Notes are stored in the browser's `localStorage` keyed by the session's `sessionId`, so they persist across window restarts — but are per-browser and never written to disk (the board stays read-only).
+- **Folder / worktree sub-grouping** — in the 按仓库 view, when a repo has windows in multiple working directories (e.g. git worktrees), each folder gets its own `📁` sub-section. Single-folder repos stay flat. (按状态 and 存档 views are unchanged.)
 
 Each card has a three-level title so you can both understand and *locate* the window:
 
@@ -118,6 +120,8 @@ Unit tests cover every parser (CC sessions, transcript title/last-prompt/pr-link
 - **Idle lifecycle + ↩ 恢复:** windows idle >4h move to 🗄 存档; >30h are dropped. Archived cards show idle age and a restore button. Thresholds configurable via `--idle-archive` / `--idle-drop` (0 disables each).
 - **按仓库 / 按状态 toggle:** switch between repo-grouped and status-grouped layout with localStorage persistence.
 - **专注 filter:** one-click mode that hides 空闲 and 等CI/复评, showing only 等你 and 跑着.
+- **Per-conversation notes:** each card has an editable `📝` note below its headline (click to edit, Enter/blur saves, Esc cancels, empty deletes); stored in browser `localStorage` keyed by `sessionId` — persists across restarts, per-browser only, never written to disk.
+- **Folder / worktree sub-grouping:** in 按仓库 view, repos with windows across multiple working directories show each folder as a `📁` sub-section; single-folder repos stay flat.
 
 ## License
 
