@@ -25,6 +25,24 @@ test('running: no raw status but very recent activity (desktop session)', () => 
   assert.equal(deriveStatus(w, opts), 'running');
 });
 
+test('needs-you: desktop session blocked on a fresh approval beats the recency guess', () => {
+  // Desktop sessions carry no raw status, so "running" is only a recency guess.
+  // A just-written approval prompt is recent, but it is awaiting the user — the
+  // alert must win over the guess (was wrongly reported "running").
+  const w = { rawStatus: undefined, awaitingInput: true, lastActivityAt: NOW - 5_000 };
+  assert.equal(deriveStatus(w, opts), 'needs-you');
+});
+
+test('running: authoritative busy status still beats a pending tool (executing, not waiting)', () => {
+  const w = { rawStatus: 'busy', awaitingInput: true, lastActivityAt: NOW - 5_000 };
+  assert.equal(deriveStatus(w, opts), 'running');
+});
+
+test('running: desktop session with recent activity and no awaiting signal stays running', () => {
+  const w = { rawStatus: undefined, awaitingInput: false, lastActivityAt: NOW - 5_000 };
+  assert.equal(deriveStatus(w, opts), 'running');
+});
+
 test('idle: no raw status and stale activity', () => {
   const w = { rawStatus: undefined, lastActivityAt: NOW - 3 * 60 * 60_000 };
   assert.equal(deriveStatus(w, opts), 'idle');

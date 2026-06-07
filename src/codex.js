@@ -82,8 +82,11 @@ export function extractCodexActivity(lines, opts = {}) {
 }
 
 /**
- * Running while a turn is in flight (task_started seen last), idle once the
- * turn finished (task_complete seen last). Defaults to idle.
+ * Running while a turn is in flight (task_started seen last), idle once the turn
+ * finished — whether it completed (task_complete) or was interrupted
+ * (turn_aborted, e.g. the user pressed Esc). Defaults to idle. Without the
+ * turn_aborted case an aborted turn would stay "running" forever, since Codex
+ * never writes a task_complete for it.
  * @returns {'running'|'idle'}
  */
 export function extractCodexStatus(lines) {
@@ -92,7 +95,7 @@ export function extractCodexStatus(lines) {
     if (!o || o.type !== 'event_msg' || !o.payload) continue;
     const t = o.payload.type;
     if (t === 'task_started') state = 'running';
-    else if (t === 'task_complete') state = 'idle';
+    else if (t === 'task_complete' || t === 'turn_aborted') state = 'idle';
   }
   return state;
 }
