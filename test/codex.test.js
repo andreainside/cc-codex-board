@@ -72,6 +72,28 @@ test('extractCodexStatus is running after task_started, idle after task_complete
   assert.equal(extractCodexStatus(idle), 'idle');
 });
 
+test('extractCodexStatus is idle after an interrupted turn (turn_aborted)', () => {
+  // A turn the user cancels emits turn_aborted, never task_complete — it must
+  // not stay stuck on "running" (was shown 跑着 for 26h on the live board).
+  const aborted = parseRollout(
+    jl({ type: 'event_msg', payload: { type: 'task_started' } }, agentMsg('t', 'partial'), { type: 'event_msg', payload: { type: 'turn_aborted' } }),
+  ).lines;
+  assert.equal(extractCodexStatus(aborted), 'idle');
+});
+
+test('extractCodexStatus is running again when a new turn starts after an abort', () => {
+  // Interrupt then resume (task_started → turn_aborted → task_started) is a real
+  // rollout pattern; the freshest turn wins, so the session is running again.
+  const resumed = parseRollout(
+    jl(
+      { type: 'event_msg', payload: { type: 'task_started' } },
+      { type: 'event_msg', payload: { type: 'turn_aborted' } },
+      { type: 'event_msg', payload: { type: 'task_started' } },
+    ),
+  ).lines;
+  assert.equal(extractCodexStatus(resumed), 'running');
+});
+
 test('extractCodexLastActivityAt returns max timestamp in ms', () => {
   const lines = parseRollout(jl(userMsg('2026-06-06T05:00:00.000Z', 'a'), agentMsg('2026-06-06T05:30:00.000Z', 'b'))).lines;
   assert.equal(extractCodexLastActivityAt(lines), Date.parse('2026-06-06T05:30:00.000Z'));

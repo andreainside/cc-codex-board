@@ -21,17 +21,18 @@ const DEFAULT_RUNNING_RECENCY_MS = 90_000;
 const RUNNING_RAW = new Set(['running', 'busy', 'working', 'active']);
 const IDLE_RAW = new Set(['idle', 'waiting', 'done', 'complete']);
 
-// Is the window actively working right now?
-// An explicit raw status (CC CLI `status`, Codex task state) is authoritative.
-// Desktop sessions carry no raw status, so fall back to activity recency.
-function isRunning(window, now, recencyMs) {
+// Is the window actively working right now, and do we KNOW it (authoritative) or
+// only guess it (recency)? An explicit raw status (CC CLI `status`, Codex task
+// state) is authoritative. Desktop sessions carry no raw status, so the running
+// flag falls back to activity recency — a guess, flagged `authoritative:false`.
+function runningSignal(window, now, recencyMs) {
   const raw = typeof window.rawStatus === 'string' ? window.rawStatus.toLowerCase() : null;
-  if (raw && RUNNING_RAW.has(raw)) return true;
-  if (raw && IDLE_RAW.has(raw)) return false;
+  if (raw && RUNNING_RAW.has(raw)) return { running: true, authoritative: true };
+  if (raw && IDLE_RAW.has(raw)) return { running: false, authoritative: true };
   if (typeof window.lastActivityAt === 'number') {
-    return now - window.lastActivityAt <= recencyMs;
+    return { running: now - window.lastActivityAt <= recencyMs, authoritative: false };
   }
-  return false;
+  return { running: false, authoritative: false };
 }
 
 function prPending(pr) {
@@ -49,10 +50,15 @@ function prPending(pr) {
 export function deriveStatus(window, opts = {}) {
   const now = opts.now ?? Date.now();
   const recencyMs = opts.runningRecencyMs ?? DEFAULT_RUNNING_RECENCY_MS;
-  const running = isRunning(window, now, recencyMs);
+  const { running, authoritative } = runningSignal(window, now, recencyMs);
 
-  // needs-you only applies to an idle window awaiting the user's decision.
-  if (!running && window.awaitingInput) return STATUS.NEEDS_YOU;
+  // needs-you = the window is blocked on the user — its last turn ended with a
+  // question or a pending permission/approval prompt (awaitingInput). It outranks
+  // a *presumed* running state: a desktop session has no raw status, so a freshly
+  // written approval prompt reads as "running" via activity-recency and would hide
+  // the alert. An AUTHORITATIVE busy status (CLI `status=busy`, Codex task running)
+  // still wins — that tool is executing, not waiting on you.
+  if (window.awaitingInput && !(running && authoritative)) return STATUS.NEEDS_YOU;
   if (running) return STATUS.RUNNING;
   if (prPending(window.pr)) return STATUS.WAITING;
   return STATUS.IDLE;
