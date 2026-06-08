@@ -174,6 +174,9 @@ export function collectCcWindows({ claudeRoot, now, isPidAlive, titleMax, deskto
       currentActivity: t.currentActivity || '',
       lastMessage: t.lastMessage || null,
       rawStatus: session.status,
+      // CC writes this while the cli window is blocked on the user (e.g.
+      // "permission prompt"); it's a transient, authoritative needs-you signal.
+      waitingFor: typeof session.waitingFor === 'string' ? session.waitingFor : null,
       awaitingInput: t.awaitingInput,
       prLinks: t.prLinks,
       startedAt: session.startedAt,
@@ -247,6 +250,7 @@ export function collectCodexWindows({ codexRoot, now, activeWindowMs, titleMax, 
       currentActivity: s.currentActivity || '',
       lastMessage: s.currentActivity ? { role: 'user', text: s.currentActivity } : null,
       rawStatus: s.status,
+      waitingFor: null, // Codex has no equivalent blocked-on-user flag yet
       awaitingInput: false, // Codex needs-you heuristic deferred (avoid false positives)
       prLinks: [],
       startedAt: s.startedAt,
@@ -319,6 +323,7 @@ export async function buildBoard(deps) {
     idleArchiveMs = 4 * 3600_000,
     idleDropMs = 30 * 3600_000,
     getRestoredAt = () => 0,
+    getDismissedAt = () => 0,
   } = deps;
 
   const desktopTitles = loadDesktopTitles(desktopRoot);
@@ -348,7 +353,14 @@ export async function buildBoard(deps) {
     w.label = labels[String(w.pid)] || labels[w.cwd] || null;
     w.pr = w.pr || null;
     w.status = deriveStatus(
-      { rawStatus: w.rawStatus, awaitingInput: w.awaitingInput, lastActivityAt: w.lastActivityAt, pr: w.pr },
+      {
+        rawStatus: w.rawStatus,
+        awaitingInput: w.awaitingInput,
+        waitingFor: w.waitingFor,
+        dismissedAt: getDismissedAt(w.id),
+        lastActivityAt: w.lastActivityAt,
+        pr: w.pr,
+      },
       { now, runningRecencyMs },
     );
     // Headline: cached AI summary (if enabled) → PR title → branch → opening prompt.

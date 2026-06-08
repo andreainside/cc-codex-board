@@ -162,6 +162,13 @@ test('cards carry a summarize button', () => {
   assert.match(renderBoard(board, Date.now()), /data-action="summarize"/);
 });
 
+test('only needs-you cards carry a 忽略 (dismiss) button', () => {
+  const mk = (status) => ({ summary: { total: 1, counts: {} }, groups: [{ repo: 'r', windows: [{ id: 'a', tool: 'CC', status, title: 'x' }] }], windows: [], archive: { windows: [] } });
+  assert.match(renderBoard(mk('needs-you'), Date.now()), /data-action="dismiss"[^>]*>忽略</);
+  assert.doesNotMatch(renderBoard(mk('idle'), Date.now()), /data-action="dismiss"/);
+  assert.doesNotMatch(renderBoard(mk('running'), Date.now()), /data-action="dismiss"/);
+});
+
 test('renderBoard focus shows only needs-you + running (repo & status)', () => {
   const ws = [
     { id: 'a', tool: 'CC', status: 'needs-you', title: 'A' },

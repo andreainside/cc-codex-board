@@ -49,7 +49,7 @@ A single local Node service = **collector** + **static web page**.
 - `startedAt`, `runningDuration`, `lastActivityAt`, `repo` (grouping key)
 
 ## Status taxonomy + priority
-1. **needs-you** (red, pinned): idle **and** the last turn ended awaiting the user. Triggered by either (a) the last assistant message ending with a question, or (b) a tool call that is pending with no `tool_result` yet — i.e. blocked on a permission / confirmation prompt. Conservative — false positives are worse than false negatives.
+1. **needs-you** (red, pinned): the window is blocked on the user. Triggered by any of: (a) the cli session file's `waitingFor` field is set — CC's own authoritative "blocked on the user" flag, written while a terminal window sits at a permission/approval prompt (the `tool_use` isn't flushed to the transcript yet, so (c) can't see it); (b) the last assistant message ending with a question; or (c) a tool call pending with no `tool_result` yet (desktop approvals). (a) is authoritative and overrides a busy/recent guess; (b)/(c) yield to an authoritative busy status. Conservative — false positives are worse than false negatives. Can be manually muted (see 忽略 below).
 2. **running** (blue): raw status running/busy, or very recent activity.
 3. **waiting-ci-review** (amber): PR open with CI or review pending.
 4. **idle** (gray).
@@ -59,7 +59,9 @@ Top summary bar (counts per status) · grouped by repo · card grid · left colo
 
 **View controls:** 按仓库 / 按状态 toggle (localStorage); 专注 filter (hides 空闲 + 等CI/复评, localStorage); 🗄 存档 view (idle-archived windows, each with idle-age label and ↩ 恢复 button).
 
-**Per-card user notes:** each card exposes an editable `📝` note field below its headline. Notes are stored in the browser's `localStorage` keyed by the session's `sessionId`; they survive page reloads and server restarts but are browser-local and never written to disk (the board stays read-only).
+**Per-card user notes:** each card exposes an editable `📝` note field below its headline. Notes are stored in the browser's `localStorage` keyed by the session's `sessionId`; they survive page reloads and server restarts but are browser-local and never written to disk (the board stays read-only). A filled note is styled as a sticky note (amber底色 + soft shadow) so your own annotations stand out from the read-only card text.
+
+**忽略 (manual dismiss):** every `等你/needs-you` card carries a `忽略` button. Clicking it mutes that window's needs-you alert (the card drops to `空闲/idle` and the top-bar count decrements) — for when you've decided you're done with the conversation and won't answer its question. The mute is held server-side in an in-memory `dismissedAt` map (like `restoredAt`) and **re-arms automatically** once the window produces genuinely new activity (a new question / permission prompt bumps `lastActivityAt` past the dismissal). It does not survive a server restart.
 
 **Folder / worktree sub-grouping (按仓库 view only):** when a repo has windows in more than one working directory (e.g. separate git worktrees), the 按仓库 view nests each folder as a `📁` sub-section within the repo group. Repos with a single folder remain flat. 按状态 and 存档 views are unaffected.
 

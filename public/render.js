@@ -128,6 +128,10 @@ function renderCard(w, now, opts = {}) {
   const restoreBtn = opts.archive
     ? `<button class="act" data-id="${escapeHtml(w.id)}" data-action="restore">↩ 恢复</button>`
     : '';
+  // "忽略": mute a red "等你" card you've decided you're done with. Re-arms on new activity.
+  const dismissBtn = w.status === 'needs-you' && !opts.archive
+    ? `<button class="act act-dismiss" data-id="${escapeHtml(w.id)}" data-action="dismiss">忽略</button>`
+    : '';
 
   const notes = opts.notes || {};
   const session = escapeHtml(w.sessionId || '');
@@ -165,7 +169,7 @@ function renderCard(w, now, opts = {}) {
       ${prRow(w.pr)}
       <div class="timeline">${escapeHtml(timeline)}</div>
       ${idleLine}
-      <div class="actions">${sumBtn}${restoreBtn}</div>
+      <div class="actions">${sumBtn}${dismissBtn}${restoreBtn}</div>
     </div>`;
 }
 

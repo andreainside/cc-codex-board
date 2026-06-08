@@ -142,6 +142,25 @@ test('POST /api/restore → ok', async () => {
   } finally { server.close(); }
 });
 
+test('POST /api/dismiss → ok', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), dismissWindow: async (id) => ({ id, ok: true }) });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await post(port, '/api/dismiss', { id: 'cc:1' });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, true);
+  } finally { server.close(); }
+});
+
+test('POST /api/dismiss unknown id → 404', async () => {
+  const handler = createRequestHandler({ getBoard: async () => ({}), dismissWindow: async () => null });
+  const { server, port } = await startServer(handler);
+  try {
+    const r = await post(port, '/api/dismiss', { id: 'nope' });
+    assert.equal(r.status, 404);
+  } finally { server.close(); }
+});
+
 test('POST /api/summarize with oversized body returns 400 (no hang)', async () => {
   const handler = createRequestHandler({ getBoard: async () => ({}), summarizeWindow: async () => null });
   const { server, port } = await startServer(handler);

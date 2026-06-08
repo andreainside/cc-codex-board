@@ -55,9 +55,9 @@ function readJsonBody(req, limit = 64 * 1024) {
 }
 
 /**
- * @param {{getBoard:()=>Promise<object>, summarizeWindow?:Function|null, restoreWindow?:Function|null, publicDir?:string}} deps
+ * @param {{getBoard:()=>Promise<object>, summarizeWindow?:Function|null, restoreWindow?:Function|null, dismissWindow?:Function|null, publicDir?:string}} deps
  */
-export function createRequestHandler({ getBoard, summarizeWindow = null, restoreWindow = null, publicDir = DEFAULT_PUBLIC }) {
+export function createRequestHandler({ getBoard, summarizeWindow = null, restoreWindow = null, dismissWindow = null, publicDir = DEFAULT_PUBLIC }) {
   const root = path.resolve(publicDir);
   return async function handle(req, res) {
     let pathname = '/';
@@ -77,12 +77,12 @@ export function createRequestHandler({ getBoard, summarizeWindow = null, restore
       return;
     }
 
-    if (pathname === '/api/summarize' || pathname === '/api/restore') {
+    if (pathname === '/api/summarize' || pathname === '/api/restore' || pathname === '/api/dismiss') {
       if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method Not Allowed' }); return; }
       const body = await readJsonBody(req);
       const id = body && typeof body.id === 'string' ? body.id : null;
       if (!id) { sendJson(res, 400, { error: 'missing id' }); return; }
-      const fn = pathname === '/api/summarize' ? summarizeWindow : restoreWindow;
+      const fn = pathname === '/api/summarize' ? summarizeWindow : pathname === '/api/restore' ? restoreWindow : dismissWindow;
       try {
         const result = fn ? await fn(id) : null;
         if (!result) { sendJson(res, 404, { error: 'unknown window' }); return; }
@@ -140,6 +140,7 @@ export function createBoardProvider(config) {
   const summarizer = createSummarizer({ enabled: !!config.summary, model: config.summaryModel, timeoutMs: config.summaryTimeoutMs });
 
   const restoredAt = new Map(); // id -> ms; manual restore resets the idle clock
+  const dismissedAt = new Map(); // id -> ms; manual "忽略" mutes needs-you until new activity
 
   const build = () =>
     buildBoard({
@@ -159,6 +160,7 @@ export function createBoardProvider(config) {
       idleArchiveMs: config.idleArchiveMs,
       idleDropMs: config.idleDropMs,
       getRestoredAt: (id) => restoredAt.get(id) || 0,
+      getDismissedAt: (id) => dismissedAt.get(id) || 0,
     });
 
   // Cache the whole board briefly so rapid browser polling is cheap; git/gh
@@ -186,7 +188,20 @@ export function createBoardProvider(config) {
     return { id, ok: true };
   }
 
-  return { getBoard, summarizeWindow, restoreWindow };
+  // Manual "忽略": mute a window's needs-you alert. It re-arms automatically once
+  // the window sees new activity (deriveStatus compares dismissedAt vs lastActivityAt).
+  async function dismissWindow(id) {
+    const board = await getBoard();
+    const all = [...(board.windows || []), ...((board.archive && board.archive.windows) || [])];
+    if (!all.some((x) => x.id === id)) return null;
+    dismissedAt.set(id, Date.now());
+    // prune stale dismiss markers
+    const cutoff = Date.now() - (config.idleDropMs || 30 * 3600_000);
+    for (const [k, v] of dismissedAt) if (v < cutoff) dismissedAt.delete(k);
+    return { id, ok: true };
+  }
+
+  return { getBoard, summarizeWindow, restoreWindow, dismissWindow };
 }
 
 /**
@@ -194,7 +209,7 @@ export function createBoardProvider(config) {
  * @param {object} config
  */
 export function createServer(config) {
-  const { getBoard, summarizeWindow, restoreWindow } = createBoardProvider(config);
-  const handler = createRequestHandler({ getBoard, summarizeWindow, restoreWindow });
+  const { getBoard, summarizeWindow, restoreWindow, dismissWindow } = createBoardProvider(config);
+  const handler = createRequestHandler({ getBoard, summarizeWindow, restoreWindow, dismissWindow });
   return http.createServer(handler);
 }
