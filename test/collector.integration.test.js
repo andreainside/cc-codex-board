@@ -120,3 +120,47 @@ test('buildBoard produces the expected live window list from a fixture tree', as
   assert.equal(board.groups[0].repo, 'acme/app');
   assert.equal(board.groups[0].windows[0].status, 'needs-you');
 });
+
+test('cli session blocked on a permission prompt surfaces needs-you via waitingFor; 忽略 mutes it', async () => {
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'ccb-wf-'));
+  try {
+    const claude = path.join(h, '.claude');
+    // status:"waiting" + waitingFor — exactly what CC writes at a "Do you want to proceed?" prompt.
+    writeJson(path.join(claude, 'sessions', '2001.json'), {
+      pid: 2001, sessionId: 'sid-perm', cwd: '/work/app', startedAt: NOW - 3600_000,
+      status: 'waiting', waitingFor: 'permission prompt', updatedAt: NOW - 5_000, entrypoint: 'cli',
+    });
+    // Transcript ends on an assistant TEXT block (no "?", no pending tool_use) →
+    // awaitingInput is false. waitingFor must be what surfaces the alert.
+    writeJsonl(path.join(claude, 'projects', '-work-app', 'sid-perm.jsonl'), [
+      { type: 'user', message: { role: 'user', content: '跑一下这个命令' }, timestamp: iso(3600_000) },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '让我先核实一下规格。' }] }, timestamp: iso(5_000) },
+    ]);
+
+    const deps = {
+      claudeRoot: claude,
+      codexRoot: path.join(h, '.codex'),
+      now: NOW,
+      isPidAlive: (pid) => pid === 2001,
+      resolveRepoBranch: async () => ({ repo: 'acme/app', branch: 'feature/x' }),
+      fetchPr: async () => null,
+    };
+
+    const board = await buildBoard(deps);
+    const w = board.windows.find((x) => x.id === 'cc:2001');
+    assert.ok(w, 'permission-prompt window present');
+    assert.equal(w.awaitingInput, false, 'transcript yields no awaiting signal');
+    assert.equal(w.waitingFor, 'permission prompt');
+    assert.equal(w.status, 'needs-you', 'waitingFor surfaces needs-you on its own');
+
+    // 忽略: dismiss now → muted to idle.
+    const muted = await buildBoard({ ...deps, getDismissedAt: (id) => (id === 'cc:2001' ? NOW : 0) });
+    assert.equal(muted.windows.find((x) => x.id === 'cc:2001').status, 'idle');
+
+    // A dismissal from BEFORE the last activity does not mute (new activity re-arms).
+    const rearmed = await buildBoard({ ...deps, getDismissedAt: (id) => (id === 'cc:2001' ? NOW - 60_000 : 0) });
+    assert.equal(rearmed.windows.find((x) => x.id === 'cc:2001').status, 'needs-you');
+  } finally {
+    fs.rmSync(h, { recursive: true, force: true });
+  }
+});

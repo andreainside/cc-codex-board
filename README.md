@@ -31,6 +31,7 @@ node bin/cc-codex-board.js --open      # or: npm start
 - **Grouped by repo**, card grid, **left color stripe by status**, **needs-you pinned to top**.
 - Auto-refreshes every 5s with an "updated Ns ago" indicator.
 - **✨ 总结 button** on every card — click to request an on-demand AI title for that window (uses your local `claude -p`, click = consent; works even without `--summary`).
+- **忽略 button** on every `等你` card — mute a red alert you've decided you're done with (the card drops to `空闲`). It **re-arms automatically** the next time that window asks something new, so you never lose a genuinely new prompt.
 - **Idle lifecycle:** windows idle for more than 4h move to a **🗄 存档** (archive) view instead of cluttering the main board; windows idle more than 30h are dropped entirely. Each archived card shows how long it has been idle and has an **↩ 恢复** button that moves it back to the main view instantly.
 - **按仓库 / 按状态 toggle** — switch between repo-grouped and status-grouped layout; preference is remembered in `localStorage`.
 - **专注 filter** — one click hides 空闲 and 等CI/复评 windows, showing only 等你 and 跑着; persists across refreshes.
@@ -50,7 +51,7 @@ Plus: tool badge (**CC 终端 / CC 桌面 / Codex 本地**) · status · `branch
 
 | Status | Color | Meaning |
 |---|---|---|
-| **needs-you** | red (pinned) | Idle **and** the last turn ended awaiting your input/decision. |
+| **needs-you** | red (pinned) | Blocked on you: a cli `waitingFor` flag (terminal permission prompt), the last assistant turn ended with a question, or a pending tool with no result (desktop approval). Manually mutable via **忽略**. |
 | **running** | blue | Actively working (raw status, or very recent activity). |
 | **waiting-ci-review** | amber | PR open with CI or review pending. |
 | **idle** | gray | Idle, nothing pending. |
@@ -63,7 +64,7 @@ A single local Node service = collector + static page.
 
 | Source | Used for |
 |---|---|
-| `~/.claude/sessions/<pid>.json` | live CC windows (pid, cwd, startedAt, status); liveness via `kill(pid,0)` |
+| `~/.claude/sessions/<pid>.json` | live CC windows (pid, cwd, startedAt, status, `waitingFor`); liveness via `kill(pid,0)` |
 | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | title (first user prompt), current activity (`last-prompt`), PRs (`pr-link`), timestamps, needs-you signal |
 | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` | Codex local windows (subagent/guardian rollouts filtered out); liveness via recent activity |
 | `~/.codex/session_index.jsonl` | Codex thread name = its on-screen window title |

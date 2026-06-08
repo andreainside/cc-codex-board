@@ -42,7 +42,8 @@ function prPending(pr) {
 
 /**
  * Derive the board status for a window.
- * @param {{rawStatus?:string, awaitingInput?:boolean, lastActivityAt?:number,
+ * @param {{rawStatus?:string, awaitingInput?:boolean, waitingFor?:string|null,
+ *   dismissedAt?:number, lastActivityAt?:number,
  *   pr?:{number?:number, ciStatus?:string, reviewStatus?:string}}} window
  * @param {{now?:number, runningRecencyMs?:number}} [opts]
  * @returns {'needs-you'|'running'|'waiting-ci-review'|'idle'}
@@ -52,13 +53,27 @@ export function deriveStatus(window, opts = {}) {
   const recencyMs = opts.runningRecencyMs ?? DEFAULT_RUNNING_RECENCY_MS;
   const { running, authoritative } = runningSignal(window, now, recencyMs);
 
-  // needs-you = the window is blocked on the user — its last turn ended with a
-  // question or a pending permission/approval prompt (awaitingInput). It outranks
-  // a *presumed* running state: a desktop session has no raw status, so a freshly
-  // written approval prompt reads as "running" via activity-recency and would hide
-  // the alert. An AUTHORITATIVE busy status (CLI `status=busy`, Codex task running)
-  // still wins — that tool is executing, not waiting on you.
-  if (window.awaitingInput && !(running && authoritative)) return STATUS.NEEDS_YOU;
+  // Manual dismissal ("忽略"): the user decided this window's pending ask is
+  // handled and doesn't want it flagged red anymore. Suppress needs-you until
+  // genuinely NEW activity arrives — i.e. lastActivityAt advances past the moment
+  // it was dismissed. (Mirrors the restore clock; a new question/permission prompt
+  // bumps lastActivityAt and re-arms the alert.)
+  const dismissed =
+    typeof window.dismissedAt === 'number' && window.dismissedAt >= (window.lastActivityAt ?? 0);
+
+  // needs-you = the window is blocked on the user. Two signals:
+  //  (1) waitingFor — CC's OWN authoritative "blocked on the user" flag, written to
+  //      the cli session file while a permission/approval prompt is showing (the
+  //      tool_use isn't flushed to the transcript yet, so awaitingInput can't see
+  //      it). Authoritative: it overrides even a busy/recent-activity guess.
+  //  (2) awaitingInput — derived from the transcript (last turn ended with a
+  //      question, or a pending tool with no result). It outranks a *presumed*
+  //      running state (desktop recency guess) but yields to an AUTHORITATIVE busy
+  //      status (CLI `status=busy`, Codex task running) — that tool is executing.
+  if (!dismissed) {
+    if (window.waitingFor) return STATUS.NEEDS_YOU;
+    if (window.awaitingInput && !(running && authoritative)) return STATUS.NEEDS_YOU;
+  }
   if (running) return STATUS.RUNNING;
   if (prPending(window.pr)) return STATUS.WAITING;
   return STATUS.IDLE;

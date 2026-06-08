@@ -114,10 +114,24 @@ body {
 }
 .act:hover { background: #f0f0f0; }
 .act:disabled { opacity: 0.6; cursor: default; }
+/* "忽略" acts on a red 等你 card — tint it so it reads as a mute, not a primary action. */
+.act-dismiss { color: #b00; border-color: #f1c4c4; }
+.act-dismiss:hover { background: #fdecec; }
 .idle-age { font-size: 12px; color: #999; margin-top: 4px; }
 .note { margin: 4px 0 2px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
 .note.empty { opacity: 0.55; }
+/* A filled note is the user's OWN annotation — make it stand out like a sticky note:
+   amber底色 + 一圈柔和阴影, so it's clearly distinct from the read-only card text. */
+.note:not(.empty) {
+  background: #fff5cc;
+  border: 1px solid #f0e2a6;
+  border-radius: 7px;
+  padding: 5px 9px;
+  margin: 7px 0;
+  box-shadow: 0 1px 4px rgba(120, 95, 0, 0.18);
+}
 .note-text { color: #555; }
+.note:not(.empty) .note-text { color: #5a4a00; font-weight: 500; }
 .note-edit, .note-add { font: inherit; font-size: 12px; border: none; background: none; cursor: pointer; color: #888; padding: 0; }
 .note-edit:hover, .note-add:hover { color: #06c; }
 .note-input { font: inherit; font-size: 12px; width: 100%; padding: 2px 6px; border: 1px solid #06c; border-radius: 5px; }

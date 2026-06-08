@@ -150,6 +150,21 @@ boardEl.addEventListener('click', async (e) => {
     return;
   }
 
+  if (action === 'dismiss') {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      await postAction('/api/dismiss', id);
+      const w = findWindow(id);
+      if (w) w.status = 'idle'; // optimistic; next poll reconciles counts + grouping
+      render();
+    } catch {
+      btn.textContent = '失败';
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
+    }
+    return;
+  }
+
   // restore
   btn.disabled = true;
   btn.textContent = '…';
