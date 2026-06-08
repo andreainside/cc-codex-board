@@ -150,31 +150,44 @@ export function extractLastActivityAt(lines) {
 /**
  * Best-effort needs-you signal. True when the session is awaiting the user:
  *  (1) the last assistant text ended with a question, OR
- *  (2) a tool call is still pending (no tool_result yet) — i.e. blocked on a
+ *  (2) a tool call is still pending (no tool_result anywhere) — i.e. blocked on a
  *      permission / confirmation / plan-approval prompt. deriveStatus gates this
- *      behind !running, so a busy window with an in-flight tool stays "running".
+ *      behind an authoritative busy status, so a CLI/Codex window with an
+ *      in-flight tool stays "running".
  * Conservative: a real user message after an unresolved tool clears the signal.
+ *
+ * tool_use ↔ tool_result are matched by set membership over the WHOLE transcript,
+ * NOT by forward scan order: Claude Code can flush a tool_result line to the JSONL
+ * *before* its tool_use line (sub-second write race). A strict delete-then-add
+ * forward pass would no-op the delete then re-add the id, leaving it stuck
+ * "pending" forever and falsely flagging a busy autonomous session as awaiting
+ * input. A result anywhere in the transcript resolves its use.
  * @param {object[]} lines
  * @returns {boolean}
  */
 export function extractAwaitingInput(lines) {
+  const resolved = new Set(); // every tool_use id that has a tool_result anywhere
+  for (const o of lines) {
+    if (!isUserLine(o)) continue;
+    const c = o.message.content;
+    if (Array.isArray(c)) {
+      for (const b of c) if (b && b.type === 'tool_result' && b.tool_use_id) resolved.add(b.tool_use_id);
+    }
+  }
+
   let last = null; // { role: 'assistant'|'user', text }
-  const pendingToolUse = new Set(); // tool_use ids without a later tool_result
+  const pendingToolUse = new Set(); // tool_use ids with no tool_result anywhere
 
   for (const o of lines) {
     if (!o) continue;
     if (o.type === 'assistant' && o.message) {
       const c = o.message.content;
       if (Array.isArray(c)) {
-        for (const b of c) if (b && b.type === 'tool_use' && b.id) pendingToolUse.add(b.id);
+        for (const b of c) if (b && b.type === 'tool_use' && b.id && !resolved.has(b.id)) pendingToolUse.add(b.id);
       }
       const t = messageText(o.message).trim();
       if (t) last = { role: 'assistant', text: t };
     } else if (isUserLine(o)) {
-      const c = o.message.content;
-      if (Array.isArray(c)) {
-        for (const b of c) if (b && b.type === 'tool_result' && b.tool_use_id) pendingToolUse.delete(b.tool_use_id);
-      }
       const t = messageText(o.message).trim();
       if (t && !isMetaUserText(t)) {
         last = { role: 'user', text: t };

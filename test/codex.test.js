@@ -94,6 +94,33 @@ test('extractCodexStatus is running again when a new turn starts after an abort'
   assert.equal(extractCodexStatus(resumed), 'running');
 });
 
+test('extractCodexStatus: terminal event flushed before its task_started (write race) → idle', () => {
+  // Codex can write a turn's terminal event (task_complete / turn_aborted) to the
+  // rollout JSONL *before* that turn's task_started (sub-second flush race). The
+  // turn finished, so the window must read idle — a pure last-in-file-order scan
+  // would read task_started last and pin it "running" forever.
+  const raced = parseRollout(
+    jl(
+      { timestamp: '2026-06-06T05:00:05.000Z', type: 'event_msg', payload: { type: 'task_complete' } },
+      { timestamp: '2026-06-06T05:00:00.000Z', type: 'event_msg', payload: { type: 'task_started' } },
+    ),
+  ).lines;
+  assert.equal(extractCodexStatus(raced), 'idle');
+});
+
+test('extractCodexStatus: resume-after-abort with timestamps stays running (freshest turn wins)', () => {
+  // Guards the fix from over-correcting: when a new turn genuinely starts last
+  // (by timestamp), the session is running again.
+  const resumed = parseRollout(
+    jl(
+      { timestamp: '2026-06-06T05:00:00.000Z', type: 'event_msg', payload: { type: 'task_started' } },
+      { timestamp: '2026-06-06T05:00:01.000Z', type: 'event_msg', payload: { type: 'turn_aborted' } },
+      { timestamp: '2026-06-06T05:00:10.000Z', type: 'event_msg', payload: { type: 'task_started' } },
+    ),
+  ).lines;
+  assert.equal(extractCodexStatus(resumed), 'running');
+});
+
 test('extractCodexLastActivityAt returns max timestamp in ms', () => {
   const lines = parseRollout(jl(userMsg('2026-06-06T05:00:00.000Z', 'a'), agentMsg('2026-06-06T05:30:00.000Z', 'b'))).lines;
   assert.equal(extractCodexLastActivityAt(lines), Date.parse('2026-06-06T05:30:00.000Z'));

@@ -82,22 +82,35 @@ export function extractCodexActivity(lines, opts = {}) {
 }
 
 /**
- * Running while a turn is in flight (task_started seen last), idle once the turn
- * finished — whether it completed (task_complete) or was interrupted
- * (turn_aborted, e.g. the user pressed Esc). Defaults to idle. Without the
- * turn_aborted case an aborted turn would stay "running" forever, since Codex
- * never writes a task_complete for it.
+ * Running while a turn is in flight (the freshest turn-boundary event is a
+ * task_started), idle once the turn finished — whether it completed
+ * (task_complete) or was interrupted (turn_aborted, e.g. the user pressed Esc).
+ * Defaults to idle. Without the turn_aborted case an aborted turn would stay
+ * "running" forever, since Codex never writes a task_complete for it.
+ *
+ * "Freshest" is decided BY TIMESTAMP, with file order only as a tiebreak for
+ * events that share or lack one: Codex can flush a turn's terminal event to the
+ * rollout JSONL *before* that turn's task_started (sub-second write race), and a
+ * pure last-in-file-order scan would then read task_started last and pin the
+ * window "running" forever (one window showed 跑着 for 26h). Same defect class as
+ * the tool_use/tool_result race fixed in cc-transcript.js.
  * @returns {'running'|'idle'}
  */
 export function extractCodexStatus(lines) {
-  let state = 'idle';
-  for (const o of lines) {
+  let best = null; // { ts, idx, running } — latest turn-boundary event
+  for (let i = 0; i < lines.length; i++) {
+    const o = lines[i];
     if (!o || o.type !== 'event_msg' || !o.payload) continue;
     const t = o.payload.type;
-    if (t === 'task_started') state = 'running';
-    else if (t === 'task_complete' || t === 'turn_aborted') state = 'idle';
+    let running;
+    if (t === 'task_started') running = true;
+    else if (t === 'task_complete' || t === 'turn_aborted') running = false;
+    else continue;
+    const parsed = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+    const ts = Number.isNaN(parsed) ? -Infinity : parsed; // untimestamped events tie, broken by file order
+    if (best === null || ts > best.ts || (ts === best.ts && i >= best.idx)) best = { ts, idx: i, running };
   }
-  return state;
+  return best && best.running ? 'running' : 'idle';
 }
 
 /** Max line timestamp in ms, or null. */

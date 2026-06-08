@@ -201,6 +201,23 @@ test('awaitingInput: user typed a new prompt after an unresolved tool_use → fa
   assert.equal(extractAwaitingInput([asstTool('t1'), userText('do something else')]), false);
 });
 
+test('awaitingInput: tool_result flushed before its tool_use (write race) → false', () => {
+  // Claude Code can write the tool_result line to the JSONL *before* its tool_use
+  // line (sub-second flush ordering). Both exist, so the tool is resolved. A
+  // strict forward delete-then-add would leave the id stuck "pending" forever,
+  // falsely marking a busy autonomous session as awaiting input.
+  assert.equal(extractAwaitingInput([toolResult('t1'), asstTool('t1'), asstText('Done.')]), false);
+});
+
+test('awaitingInput: a later out-of-order resolution does not hide a genuinely pending tool', () => {
+  // t1 resolved out of order (result before use); t2 issued afterward with no
+  // result anywhere → still awaiting on t2.
+  assert.equal(
+    extractAwaitingInput([toolResult('t1'), asstTool('t1'), asstText('next'), asstTool('t2')]),
+    true,
+  );
+});
+
 test('summarizeTranscript composes the fields from raw text', () => {
   const text = jl(
     { type: 'user', message: { role: 'user', content: '开场提问' }, timestamp: '2026-06-06T03:00:00.000Z' },
