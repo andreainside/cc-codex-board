@@ -182,9 +182,12 @@ export function createBoardProvider(config) {
     const all = [...(board.windows || []), ...((board.archive && board.archive.windows) || [])];
     if (!all.some((x) => x.id === id)) return null;
     restoredAt.set(id, Date.now());
-    // prune stale restore markers
-    const cutoff = Date.now() - (config.idleDropMs || 30 * 3600_000);
-    for (const [k, v] of restoredAt) if (v < cutoff) restoredAt.delete(k);
+    // prune stale restore markers — but idleDropMs === 0 means "keep forever",
+    // so don't expire the marker (|| would wrongly coalesce 0 to the 30h default).
+    if (config.idleDropMs > 0) {
+      const cutoff = Date.now() - config.idleDropMs;
+      for (const [k, v] of restoredAt) if (v < cutoff) restoredAt.delete(k);
+    }
     return { id, ok: true };
   }
 
@@ -195,9 +198,12 @@ export function createBoardProvider(config) {
     const all = [...(board.windows || []), ...((board.archive && board.archive.windows) || [])];
     if (!all.some((x) => x.id === id)) return null;
     dismissedAt.set(id, Date.now());
-    // prune stale dismiss markers
-    const cutoff = Date.now() - (config.idleDropMs || 30 * 3600_000);
-    for (const [k, v] of dismissedAt) if (v < cutoff) dismissedAt.delete(k);
+    // prune stale dismiss markers — idleDropMs === 0 ("keep forever") must not
+    // expire the marker (|| would wrongly coalesce 0 to the 30h default).
+    if (config.idleDropMs > 0) {
+      const cutoff = Date.now() - config.idleDropMs;
+      for (const [k, v] of dismissedAt) if (v < cutoff) dismissedAt.delete(k);
+    }
     return { id, ok: true };
   }
 

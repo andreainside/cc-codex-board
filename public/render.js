@@ -140,7 +140,7 @@ function renderCard(w, now, opts = {}) {
     ? `<div class="note" data-session="${session}"><span class="note-text">📝 ${escapeHtml(noteText)}</span><button class="note-edit" data-action="note" data-session="${session}">✎</button></div>`
     : `<div class="note empty" data-session="${session}"><button class="note-add" data-action="note" data-session="${session}">📝 备注…</button></div>`;
 
-  // 1) headline — "what it's doing" (AI summary / PR title / branch / window title / opening prompt)
+  // 1) headline — "what it's doing" (AI summary / window title / PR title / branch / opening prompt)
   const headline = (w.headline && w.headline.text) || w.title || '(尚无提问)';
   const isWinHeadline = w.headline && w.headline.source === 'windowtitle';
   // 2) subtitle — the opening prompt, only when it isn't already the headline

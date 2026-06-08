@@ -11,6 +11,24 @@ export function normalizeTty(raw) {
   return t.startsWith('/dev/') ? t : `/dev/${t}`;
 }
 
+// Claude Code prefixes the terminal tab title with an ANIMATED status glyph — a
+// braille spinner (U+2800–U+28FF) or a sparkle/asterisk (✳ ✶ ✷ …). The
+// AppleScript snapshots one frame, so the glyph differs every refresh and is
+// meaningless out of context. Strip a leading run of such glyphs + the space
+// after them, so the stored title is the stable text the user actually reads.
+// Braille spinner frames (U+2800–U+28FF; the sparse frames ⠂⠄⠈ render as a tiny
+// dot) and the sparkle/asterisk family (U+2722–U+273F, incl. ✳ ✶ ✷ ✻). The
+// trailing whitespace is OPTIONAL (\s*) so a title that is ONLY a spinner frame
+// (no following text) strips to '' — parseTerminalTitles then drops that tty
+// rather than rendering a lone braille dot as a headline.
+const STATUS_GLYPH_RE = /^[⠀-⣿✢-✿]+\s*/u;
+
+/** Drop the leading animated spinner/status glyph from a terminal tab title. */
+export function stripStatusGlyph(title) {
+  if (typeof title !== 'string') return title;
+  return title.replace(STATUS_GLYPH_RE, '').trim();
+}
+
 /** Parse "tty<TAB>title" lines (from the AppleScript) into a Map. */
 export function parseTerminalTitles(output) {
   const map = new Map();
@@ -19,7 +37,7 @@ export function parseTerminalTitles(output) {
     const tab = line.indexOf('\t');
     if (tab < 0) continue;
     const tty = normalizeTty(line.slice(0, tab));
-    const title = line.slice(tab + 1).trim();
+    const title = stripStatusGlyph(line.slice(tab + 1).trim());
     if (tty && title) map.set(tty, title);
   }
   return map;

@@ -41,7 +41,7 @@ function syncControls() {
 }
 
 function render() {
-  if (!lastBoard || editing || busy) return;
+  if (!lastBoard || editing) return;
   boardEl.innerHTML = renderBoard(lastBoard, Date.now(), { view, grouping, focus, notes: loadNotes() });
   if (modeHintEl) modeHintEl.textContent = usageHint(lastBoard.meta);
   syncControls();
@@ -52,7 +52,10 @@ async function poll() {
     const res = await fetch('/api/windows', { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     lastBoard = await res.json();
-    render();
+    // Don't let a background poll clobber an in-flight summarize's spinner — but
+    // user-driven toggles (focus/grouping/archive) still re-render immediately,
+    // since render() no longer gates on `busy`.
+    if (!busy) render();
     lastOk = Date.now();
     lastError = null;
   } catch (err) {

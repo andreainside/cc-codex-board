@@ -70,8 +70,8 @@ test('resolveTerminalTitles maps pid -> terminal tab title via ps + osascript', 
   ]);
   const { resolveTerminalTitles } = createRunners({ exec, platform: 'darwin' });
   const titles = await resolveTerminalTitles([79437, 31786]);
-  assert.equal(titles.get(79437), '⠐ Implement board');
-  assert.equal(titles.get(31786), '✳ Add dedup test');
+  assert.equal(titles.get(79437), 'Implement board'); // spinner glyph stripped
+  assert.equal(titles.get(31786), 'Add dedup test');
 });
 
 test('resolveTerminalTitles is a no-op off macOS', async () => {

@@ -57,6 +57,28 @@ function isUserLine(o) {
   return o && o.type === 'user' && o.message && o.message.role !== 'assistant';
 }
 
+// Did the assistant's turn end on a question? Checks the last PROSE line, looking
+// past trailing fenced code blocks and option list-items — a clarifying question
+// is commonly followed by a ```diff``` or a bulleted list of choices, where the
+// absolute last character isn't '?'.
+function endsWithQuestion(text) {
+  const lines = String(text).split('\n');
+  let fence = false;
+  const inFence = lines.map((l) => {
+    if (/^\s*(```|~~~)/.test(l)) { fence = !fence; return true; } // the fence delimiter line itself
+    return fence;
+  });
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (inFence[i]) continue;
+    const line = lines[i].trimEnd();
+    if (!line.trim()) continue;
+    if (/[?？]$/.test(line)) return true; // a question (incl. a bulleted one)
+    if (/^\s*([-*+]|\d+[.)])\s/.test(line)) continue; // a non-question list item → keep scanning up
+    return false; // a prose line that isn't a question → the turn ended on a statement
+  }
+  return false;
+}
+
 function realUserTexts(lines) {
   const out = [];
   for (const o of lines) {
@@ -69,8 +91,11 @@ function realUserTexts(lines) {
 }
 
 function truncate(text, maxLength) {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength).trimEnd() + '…';
+  // Slice by code POINTS, not UTF-16 code units, so the cut never lands between
+  // the two halves of an astral char (emoji / CJK ext) and leaves a broken �.
+  const cps = Array.from(text);
+  if (cps.length <= maxLength) return text;
+  return cps.slice(0, maxLength).join('').trimEnd() + '…';
 }
 
 /**
@@ -196,7 +221,7 @@ export function extractAwaitingInput(lines) {
     }
   }
 
-  if (last && last.role === 'assistant' && /[?？]$/.test(last.text.trimEnd())) return true;
+  if (last && last.role === 'assistant' && endsWithQuestion(last.text)) return true;
   return pendingToolUse.size > 0;
 }
 

@@ -58,8 +58,14 @@ export function deriveStatus(window, opts = {}) {
   // genuinely NEW activity arrives — i.e. lastActivityAt advances past the moment
   // it was dismissed. (Mirrors the restore clock; a new question/permission prompt
   // bumps lastActivityAt and re-arms the alert.)
+  // dismissedAt === 0 is the "never dismissed" sentinel — the `> 0` clause stops
+  // it from satisfying `0 >= 0` and silently muting a window with no activity
+  // timestamp. But a REAL dismissal (dismissedAt = now) must still mute such a
+  // window, so treat a missing lastActivityAt as 0 rather than rejecting outright.
   const dismissed =
-    typeof window.dismissedAt === 'number' && window.dismissedAt >= (window.lastActivityAt ?? 0);
+    typeof window.dismissedAt === 'number' &&
+    window.dismissedAt > 0 &&
+    window.dismissedAt >= (typeof window.lastActivityAt === 'number' ? window.lastActivityAt : 0);
 
   // needs-you = the window is blocked on the user. Two signals:
   //  (1) waitingFor — CC's OWN authoritative "blocked on the user" flag, written to

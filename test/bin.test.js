@@ -20,3 +20,17 @@ test('the bin parses and --help prints usage and exits 0', async () => {
   assert.match(r.stdout, /Usage: cc-codex-board/);
   assert.match(r.stdout, /--summary/);
 });
+
+test('an out-of-range --port exits 1 with a friendly message, not a RangeError stack', async () => {
+  const r = await run(['--port', '70000']);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /Invalid port/);
+  assert.doesNotMatch(r.stderr, /RangeError|ERR_SOCKET_BAD_PORT/); // no uncaught stack trace
+});
+
+test('a non-numeric --port is rejected the same friendly way', async () => {
+  const r = await run(['--port', 'abc']);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /Invalid port/);
+  assert.doesNotMatch(r.stderr, /RangeError|ERR_SOCKET_BAD_PORT/);
+});

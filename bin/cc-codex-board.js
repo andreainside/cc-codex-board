@@ -63,6 +63,13 @@ const config = resolveConfig({
   flags,
 });
 
+// Validate the port up front: an out-of-range / NaN value makes server.listen()
+// throw a synchronous RangeError BEFORE the 'error' handler below can format it.
+if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
+  process.stderr.write(`✖ Invalid port ${config.port}. Must be an integer 1–65535.\n`);
+  process.exit(1);
+}
+
 const server = createServer(config);
 
 server.on('error', (err) => {

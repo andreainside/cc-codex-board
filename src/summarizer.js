@@ -62,6 +62,12 @@ export function parseClaudeResult(stdout, opts = {}) {
   let obj = null;
   try { obj = JSON.parse(stdout); } catch { obj = null; }
   if (obj && typeof obj === 'object' && (typeof obj.result === 'string' || obj.usage)) {
+    // `claude -p` can exit 0 with an ERROR envelope (rate limit, overloaded,
+    // max-turns, refusal): { is_error:true, result:<human error text> }. The
+    // process didn't throw, so the caller's try/catch never fires — treat it as a
+    // failure here so it backs off and falls back to the non-LLM headline instead
+    // of rendering the raw error string as the window's title.
+    if (obj.is_error) return { title: '', usage: null };
     const u = obj.usage || {};
     const usage = {
       inputTokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),

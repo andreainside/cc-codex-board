@@ -40,8 +40,8 @@ A single local Node service = **collector** + **static web page**.
 ## Window model (per card)
 - `tool`: `CC` | `Codex-local` | `Codex-cloud`; `entrypoint` distinguishes **CC 终端** (`cli`) vs **CC 桌面** (`claude-desktop`)
 - **Three-level title:**
-  1. `headline` — what it's working on. Non-LLM order: PR title → humanized branch → app/terminal window title → opening prompt. With `--summary`, an AI one-liner takes precedence.
-  2. `subtitle` — the session's opening prompt (shown only when it isn't already the headline)
+  1. `headline` — what it's working on. Non-LLM order, most session-specific first: the window's own tab/thread title (Claude Desktop / terminal / Codex) → PR title → humanized branch → opening prompt. A window title is ranked above pr/branch because pr/branch are shared by every session in one checkout and would otherwise collapse sibling windows to one headline; `disambiguateHeadlines` then splits any residual collision (two title-less windows in one checkout) back onto each window's opening prompt. With `--summary`, an AI one-liner takes precedence.
+  2. `subtitle` — the session's opening prompt (shown only when it isn't already the headline, and not when it merely duplicates the headline text)
   3. `windowTitle` — the **on-screen title** of the real window (🖥), so a card maps to a window
 - `branch`, `cwd`, `pid`
 - `lastMessage` — the literal latest turn (you / AI), never a summary

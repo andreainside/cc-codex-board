@@ -41,7 +41,7 @@ node bin/cc-codex-board.js --open      # or: npm start
 
 Each card has a three-level title so you can both understand and *locate* the window:
 
-1. **Headline** — what the window is working on. Non-LLM by default: PR title → humanized branch → the app's own tab/thread title → opening prompt. With [`--summary`](#optional-ai-headline---summary) it's an AI one-liner.
+1. **Headline** — what the window is working on. Non-LLM by default, **most session-specific first** (so multiple windows in one checkout stay distinct): the window's own tab/thread title (Claude Desktop / terminal / Codex) → PR title → humanized branch → opening prompt. If two cards in one checkout would still match (no per-window title), each falls back to its own opening prompt. With [`--summary`](#optional-ai-headline---summary) an AI one-liner takes precedence.
 2. **Subtitle** — the session's **opening prompt** (the precise, unique first thing you asked).
 3. **🖥 window title** — the exact title shown on your screen, so you can match the card to the real window: Claude Desktop tab name, Codex thread name, or the **terminal tab title** for CLI sessions (read via AppleScript, matched by tty; macOS only — first run may ask to allow controlling Terminal; disable with `--no-terminal-titles`).
 

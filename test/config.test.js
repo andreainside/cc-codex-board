@@ -35,6 +35,13 @@ test('resolveConfig: flags override file override defaults', () => {
   assert.equal(c.labels['123'], 'Alice');
 });
 
+test('resolveConfig coerces a string port from the config file to a number', () => {
+  // A quoted "8080" in config.json must not reach the bin's integer guard as a
+  // string (it used to bind fine; the guard would otherwise wrongly reject it).
+  assert.equal(resolveConfig({ home: '/h', fileConfig: { port: '8080' } }).port, 8080);
+  assert.equal(resolveConfig({ home: '/h', fileConfig: { port: 5000 } }).port, 5000); // number stays a number
+});
+
 test('resolveConfig expands ~ in configured roots', () => {
   const c = resolveConfig({ home: '/home/me', fileConfig: { claudeRoot: '~/custom/.claude' } });
   assert.equal(c.claudeRoot, '/home/me/custom/.claude');

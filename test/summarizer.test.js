@@ -142,6 +142,25 @@ test('parseClaudeResult: non-JSON falls back to plain title, no usage', () => {
   assert.equal(r.usage, null);
 });
 
+test('parseClaudeResult: an is_error envelope is treated as a failure (no title, no usage)', () => {
+  const stdout = JSON.stringify({
+    type: 'result', subtype: 'error_during_execution', is_error: true,
+    result: 'API Error: 429 rate_limit_error', usage: { input_tokens: 3, output_tokens: 8 }, total_cost_usd: 0.0001,
+  });
+  const r = parseClaudeResult(stdout, { maxLen: 24 });
+  assert.equal(r.title, ''); // not the raw error string
+  assert.equal(r.usage, null);
+});
+
+test('schedule: an is_error envelope falls back (no cached title, backs off)', async () => {
+  const stdout = JSON.stringify({ type: 'result', is_error: true, result: 'Overloaded', usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0.01 });
+  const s = createSummarizer({ enabled: true, exec: async () => stdout });
+  const w = { id: 'cc:err', status: 'idle', lastActivityAt: 1, title: 't', currentActivity: 'a' };
+  assert.equal(await s.schedule(w), null); // not 'Overloaded'
+  assert.equal(s.getTitle(w), null); // not cached as a title
+  assert.equal(s.getUsage().costUsd, 0); // no phantom cost from the failed call
+});
+
 test('summarizer accumulates usage across calls', async () => {
   const stdout = JSON.stringify({ result: 'x', total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 5 } });
   const s = createSummarizer({ enabled: true, exec: async () => stdout, retryBackoffMs: 0 });

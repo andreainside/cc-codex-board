@@ -45,13 +45,59 @@ export function classifyZone(w, opts) {
   return 'archive';
 }
 
+/**
+ * Make same-checkout cards distinguishable. After chooseHeadline, two windows in
+ * one repo/cwd can still share a headline when it came from a SHARED signal
+ * (pr.title / branch) and neither has its own window title — e.g. two title-less
+ * sessions in one worktree. Fall those back to their per-session opening prompt
+ * so no two cards shown together carry the same big headline.
+ * @param {object[]} windows windows with `.headline` already chosen
+ */
+export function disambiguateHeadlines(windows) {
+  const byKey = new Map(); // `${group}\n${headline}` -> windows
+  for (const w of windows) {
+    if (!w.headline) continue;
+    const key = `${w.repo || w.cwd || ''}\n${w.headline.text}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(w);
+  }
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue; // unique already
+    for (const w of group) {
+      if (w.headline.source !== 'pr' && w.headline.source !== 'branch') continue; // only shared signals
+      const prompt = (w.title || '').trim();
+      if (prompt && prompt !== '(尚无提问)' && prompt !== w.headline.text) {
+        w.headline = { text: prompt, source: 'prompt' };
+        w.subtitle = ''; // the prompt IS the headline now → don't repeat it below
+      }
+    }
+  }
+}
+
 /** Collapse Codex resume chains: keep the most recent rollout per root thread. */
 export function dedupeCodexThreads(summaries) {
+  // Resolve each rollout's TERMINAL root by chasing parent pointers transitively
+  // (A←B←C all collapse to A), with a visited-guard against cycles. A single
+  // `parentThreadId || id` hop missed 3-deep chains, leaving duplicate cards.
+  const byId = new Map();
+  for (const s of summaries) if (s && s.id != null) byId.set(s.id, s);
+  const rootOf = (s) => {
+    const seen = new Set();
+    let cur = s;
+    while (cur && cur.parentThreadId != null && byId.has(cur.parentThreadId) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.parentThreadId);
+    }
+    return cur && cur.id != null ? cur.id : s.id;
+  };
+  // Recency falls back to lastActivityAt when startedAt is missing (an unparsable
+  // session_meta timestamp must not let a stale root outrank a live resume).
+  const recency = (s) => s.startedAt ?? s.lastActivityAt ?? 0;
   const byRoot = new Map();
   for (const s of summaries) {
-    const root = s.parentThreadId || s.id;
+    const root = rootOf(s);
     const prev = byRoot.get(root);
-    if (!prev || (s.startedAt ?? 0) >= (prev.startedAt ?? 0)) byRoot.set(root, s);
+    if (!prev || recency(s) >= recency(prev)) byRoot.set(root, s);
   }
   return [...byRoot.values()];
 }
@@ -71,6 +117,10 @@ function safeRead(file) {
 // Parse cache keyed by file path + mtime + size + maxLength, so unchanged
 // transcripts/rollouts are not re-read or re-parsed on every ~5s refresh.
 const summaryCache = new Map();
+// Monotonic build counter so we can drop entries for files that scrolled out of
+// the scan window and were not touched this cycle (otherwise the Map grows
+// unbounded over a long-running daemon).
+let cacheGen = 0;
 
 function cachedSummary(file, maxLength, compute) {
   let st;
@@ -81,13 +131,24 @@ function cachedSummary(file, maxLength, compute) {
   }
   const hit = summaryCache.get(file);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.maxLength === maxLength) {
+    hit.gen = cacheGen; // touched this cycle → keep
     return hit.summary;
   }
   const text = safeRead(file);
   if (text == null) return null;
   const summary = compute(text);
-  summaryCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, maxLength, summary });
+  summaryCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, maxLength, summary, gen: cacheGen });
   return summary;
+}
+
+// Start a fresh collection cycle; entries not re-touched before pruneSummaryCache
+// are considered stale and evicted.
+function startCacheCycle() {
+  cacheGen += 1;
+}
+
+function pruneSummaryCache() {
+  for (const [file, entry] of summaryCache) if (entry.gen !== cacheGen) summaryCache.delete(file);
 }
 
 function listDir(dir) {
@@ -100,26 +161,41 @@ function listDir(dir) {
 
 // Locate a CC transcript: try the encoded-cwd path, then fall back to scanning
 // project dirs for <sessionId>.jsonl (covers any encoding edge cases).
-function findTranscriptPath(claudeRoot, cwd, sessionId) {
+export function findTranscriptPath(claudeRoot, cwd, sessionId) {
   const projects = path.join(claudeRoot, 'projects');
   const direct = path.join(projects, encodeCwd(cwd), `${sessionId}.jsonl`);
   if (fs.existsSync(direct)) return direct;
+  // Fallback scan for encoding edge cases. The same <sessionId>.jsonl can exist
+  // under multiple project dirs; trust the fallback only when it is UNAMBIGUOUS
+  // (exactly one match), else give up rather than summarize a different cwd's
+  // transcript picked by arbitrary fs order.
+  const matches = [];
   for (const dir of listDir(projects)) {
     const cand = path.join(projects, dir, `${sessionId}.jsonl`);
-    if (fs.existsSync(cand)) return cand;
+    if (fs.existsSync(cand)) matches.push(cand);
   }
-  return null;
+  return matches.length === 1 ? matches[0] : null;
+}
+
+// A desktop record is a better title source than what we already have if it is
+// live where the other is archived, or (same archived state) more recent.
+// Prevents an arbitrary fs-order, stale, or archived record from clobbering the
+// current tab title when one cliSessionId has multiple local_*.json files.
+function isBetterDesktopRecord(next, prev) {
+  if (!prev) return true;
+  if (!!next.isArchived !== !!prev.isArchived) return !next.isArchived;
+  return (next.lastActivityAt ?? 0) >= (prev.lastActivityAt ?? 0);
 }
 
 /**
- * Load the Claude Desktop per-tab titles, mapping cliSessionId -> displayed
- * title. Best-effort; returns an empty Map if the app dir is absent.
+ * Load the Claude Desktop per-tab titles, mapping cliSessionId -> the best
+ * record { title, titleSource }. Best-effort; empty Map if the app dir is absent.
  * @param {string|null} desktopRoot path to .../Claude/claude-code-sessions
- * @returns {Map<string,string>}
+ * @returns {Map<string,{title:string, titleSource?:string}>}
  */
 export function loadDesktopTitles(desktopRoot) {
-  const map = new Map();
-  if (!desktopRoot) return map;
+  const best = new Map(); // cliSessionId -> full parsed record (for tie-breaking)
+  if (!desktopRoot) return best;
   const stack = [desktopRoot];
   while (stack.length) {
     const dir = stack.pop();
@@ -134,11 +210,11 @@ export function loadDesktopTitles(desktopRoot) {
       if (e.isDirectory()) stack.push(full);
       else if (e.name.startsWith('local_') && e.name.endsWith('.json')) {
         const d = parseDesktopSession(safeRead(full) || '');
-        if (d && d.title) map.set(d.cliSessionId, d.title);
+        if (d && d.title && isBetterDesktopRecord(d, best.get(d.cliSessionId))) best.set(d.cliSessionId, d);
       }
     }
   }
-  return map;
+  return best;
 }
 
 /**
@@ -162,6 +238,7 @@ export function collectCcWindows({ claudeRoot, now, isPidAlive, titleMax, deskto
       { title: '', currentActivity: '', prLinks: [], lastActivityAt: null, awaitingInput: false };
 
     const lastActivityAt = Math.max(t.lastActivityAt ?? 0, session.updatedAt ?? 0) || session.startedAt;
+    const desktop = titles.get(session.sessionId) || null; // best Claude Desktop tab record
     windows.push({
       id: `cc:${session.pid}`,
       tool: 'CC',
@@ -169,7 +246,7 @@ export function collectCcWindows({ claudeRoot, now, isPidAlive, titleMax, deskto
       pid: session.pid,
       sessionId: session.sessionId,
       cwd: session.cwd,
-      windowTitle: titles.get(session.sessionId) || null, // title shown on the user's screen
+      windowTitle: desktop ? desktop.title : null, // title shown on the user's screen
       title: t.title || '(尚无提问)',
       currentActivity: t.currentActivity || '',
       lastMessage: t.lastMessage || null,
@@ -326,6 +403,7 @@ export async function buildBoard(deps) {
     getDismissedAt = () => 0,
   } = deps;
 
+  startCacheCycle();
   const desktopTitles = loadDesktopTitles(desktopRoot);
   const cc = claudeRoot ? collectCcWindows({ claudeRoot, now, isPidAlive, titleMax, desktopTitles }) : [];
   const codexCollectMs = idleDropMs > 0 ? Math.max(codexActiveWindowMs, idleDropMs) : 7 * 24 * 3600_000;
@@ -333,6 +411,7 @@ export async function buildBoard(deps) {
     ? collectCodexWindows({ codexRoot, now, activeWindowMs: codexCollectMs, titleMax })
     : [];
   const windows = [...cc, ...codex];
+  pruneSummaryCache(); // drop cache entries for files not touched this cycle
 
   // Fill in terminal tab titles for CLI windows that lack a displayed title.
   const cliPids = windows.filter((w) => w.tool === 'CC' && !w.windowTitle && w.pid).map((w) => w.pid);
@@ -363,12 +442,18 @@ export async function buildBoard(deps) {
       },
       { now, runningRecencyMs },
     );
-    // Headline: cached AI summary (if enabled) → PR title → branch → opening prompt.
+    // Headline: cached AI summary (if enabled) → window title → PR → branch → prompt.
     w.summaryTitle = summarizer.getTitle(w) || null;
     w.headline = chooseHeadline(w);
-    // Show the opening prompt as a subtitle only when it isn't already the headline.
-    w.subtitle = w.headline.source !== 'prompt' ? w.title || '' : '';
+    // Show the opening prompt as a subtitle only when it isn't already the headline
+    // AND doesn't merely duplicate the headline text (e.g. a Codex window whose
+    // thread name equals its title would otherwise print the same line twice).
+    w.subtitle = w.headline.source !== 'prompt' && w.title && w.title !== w.headline.text ? w.title : '';
   }
+
+  // Final pass: split any two same-checkout cards that still share a pr/branch
+  // headline (neither had its own window title) back onto their opening prompts.
+  disambiguateHeadlines(windows);
 
   // Idle lifecycle: bucket idle windows by effective idle age.
   const zoneOpts = { now, idleArchiveMs, idleDropMs, getRestoredAt };

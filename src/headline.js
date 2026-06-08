@@ -15,7 +15,11 @@ export function humanizeBranch(branch) {
   if (!branch || typeof branch !== 'string') return null;
   if (NON_DESCRIPTIVE.has(branch.toLowerCase())) return null;
   let segs = branch.split('/').filter(Boolean);
-  if (segs.length > 1 && KIND_PREFIXES.has(segs[0].toLowerCase())) segs = segs.slice(1);
+  // Drop a leading kind segment (feature/fix/chore/…) even when it is the ONLY
+  // segment: a bare-kind branch ('feature', 'fix', 'release') carries no useful
+  // info, so collapse it to null rather than surfacing the lone word as a
+  // headline that would still outrank a real per-session window title.
+  if (segs.length && KIND_PREFIXES.has(segs[0].toLowerCase())) segs = segs.slice(1);
   const label = segs.join(' · ').trim();
   return label || null;
 }
@@ -23,15 +27,24 @@ export function humanizeBranch(branch) {
 /**
  * Pick the headline and report which source it came from (so the renderer can
  * avoid repeating the opening prompt as a subtitle).
- * @param {{summaryTitle?:string, pr?:{title?:string}, branch?:string, windowTitle?:string, title?:string}} w
+ *
+ * Priority is ordered by how SESSION-SPECIFIC each signal is. summaryTitle (an
+ * AI summary of this very session) wins; then the window's own tab/thread title
+ * (Claude Desktop, terminal, or Codex), which names THIS window. pr.title and
+ * branch sit BELOW them because they are shared by every session in the same
+ * checkout/PR — ranking them higher made multiple windows in one worktree
+ * collapse to a single identical headline. The paste-y opening prompt is the last
+ * resort. (buildBoard runs a final pass that disambiguates any residual collision
+ * — two title-less windows in one checkout — by falling back to the prompt.)
+ * @param {{summaryTitle?:string, pr?:{title?:string}, branch?:string,
+ *   windowTitle?:string, title?:string}} w
  * @returns {{text:string, source:'summary'|'pr'|'branch'|'windowtitle'|'prompt'}}
  */
 export function chooseHeadline(w) {
   if (w.summaryTitle && w.summaryTitle.trim()) return { text: w.summaryTitle.trim(), source: 'summary' };
+  if (w.windowTitle && w.windowTitle.trim()) return { text: w.windowTitle.trim(), source: 'windowtitle' };
   if (w.pr && w.pr.title && w.pr.title.trim()) return { text: w.pr.title.trim(), source: 'pr' };
   const branch = humanizeBranch(w.branch);
   if (branch) return { text: branch, source: 'branch' };
-  // The app/sidebar-displayed title beats a raw paste-y opening prompt.
-  if (w.windowTitle && w.windowTitle.trim()) return { text: w.windowTitle.trim(), source: 'windowtitle' };
   return { text: (w.title || '').trim(), source: 'prompt' };
 }

@@ -56,6 +56,36 @@ test('extractTitle truncates very long prompts to a max length', () => {
   assert.ok(title.endsWith('…'));
 });
 
+test('truncate slices by code points: an emoji at the boundary is never split (no broken �)', () => {
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  // Under naive UTF-16 slicing the cut would land inside 🎉's surrogate pair.
+  const l1 = parseTranscriptLines(jl({ type: 'user', message: { role: 'user', content: 'x'.repeat(89) + '🎉 celebrate' } }));
+  const t1 = extractTitle(l1, { maxLength: 90 });
+  assert.ok(!loneSurrogate.test(t1), `lone surrogate in ${JSON.stringify(t1)}`);
+  const l2 = parseTranscriptLines(jl({ type: 'user', message: { role: 'user', content: '😀'.repeat(60) } }));
+  const t2 = extractTitle(l2, { maxLength: 5 });
+  assert.equal(t2, '😀'.repeat(5) + '…');
+  assert.ok(!loneSurrogate.test(t2));
+});
+
+test('extractAwaitingInput: a question followed by a code block or option list still counts', () => {
+  const codeBlock = parseTranscriptLines(
+    jl({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Does this diff look right?\n\n```diff\n- old\n+ new\n```' }] } }),
+  );
+  assert.equal(extractAwaitingInput(codeBlock), true);
+
+  const optionList = parseTranscriptLines(
+    jl({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Which option do you want?\n- A\n- B' }] } }),
+  );
+  assert.equal(extractAwaitingInput(optionList), true);
+
+  // Still conservative: a turn that ENDS on a statement is not awaiting input.
+  const statement = parseTranscriptLines(
+    jl({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is the result.\n\n```\ncode\n```\nDone.' }] } }),
+  );
+  assert.equal(extractAwaitingInput(statement), false);
+});
+
 test('extractCurrentActivity prefers the latest last-prompt line', () => {
   const lines = parseTranscriptLines(
     jl(

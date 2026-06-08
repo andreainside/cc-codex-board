@@ -83,6 +83,20 @@ test('dismiss does not force-idle a genuinely running window', () => {
   assert.equal(deriveStatus(w, opts), 'running');
 });
 
+test('never-dismissed (dismissedAt=0) window with no activity timestamp is NOT muted', () => {
+  // The 0 sentinel must not satisfy `0 >= (undefined ?? 0)` and silently drop a
+  // window that is genuinely blocked on a permission prompt.
+  const w = { rawStatus: 'waiting', waitingFor: 'permission prompt', dismissedAt: 0, lastActivityAt: undefined };
+  assert.equal(deriveStatus(w, opts), 'needs-you');
+});
+
+test('a REAL dismissal still mutes a window that has no numeric lastActivityAt', () => {
+  // The 0-sentinel guard must not break an actual 忽略 click (dismissedAt = now)
+  // on a freshly-written session whose lastActivityAt is undefined.
+  const w = { rawStatus: 'waiting', waitingFor: 'permission prompt', dismissedAt: NOW, lastActivityAt: undefined };
+  assert.equal(deriveStatus(w, opts), 'idle');
+});
+
 test('idle: no raw status and stale activity', () => {
   const w = { rawStatus: undefined, lastActivityAt: NOW - 3 * 60 * 60_000 };
   assert.equal(deriveStatus(w, opts), 'idle');

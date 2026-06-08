@@ -43,6 +43,10 @@ function expandHome(p, home) {
 export function resolveConfig({ home, platform = process.platform, fileConfig = {}, flags = {} }) {
   const c = { ...DEFAULTS, ...fileConfig };
 
+  // Coerce a file-config port to a number — the JSON spread keeps it verbatim, so
+  // a quoted "8080" would otherwise reach the bin's Number.isInteger guard as a
+  // string and be wrongly rejected (it used to bind fine via server.listen).
+  if (fileConfig.port != null) c.port = Number(fileConfig.port);
   if (fileConfig.idleArchiveHours != null) c.idleArchiveMs = Number(fileConfig.idleArchiveHours) * 3600_000;
   if (fileConfig.idleDropHours != null) c.idleDropMs = Number(fileConfig.idleDropHours) * 3600_000;
 
